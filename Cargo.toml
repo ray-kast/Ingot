@@ -1,7 +1,9 @@
 [package]
-name = "hello_gtk"
+name = "ingot"
 version = "0.1.0"
 authors = ["rookie1024 <rookie1286@gmail.com>"]
 
 [dependencies]
 gtk = { version = "0.5.0", features = ["v3_10"] }
+image = "0.20.0"
+gdk-pixbuf = "0.5.0"
