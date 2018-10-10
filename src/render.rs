@@ -4,15 +4,17 @@ use std::{
   cmp,
   sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, MutexGuard,
   },
 };
 use thread_pool::ThreadPool;
 
+// TODO: worry about colorspace conversions
+
 pub type Quantum = f32;
 pub type Pixel = Vector4<Quantum>;
 
-struct RenderTile {
+pub struct RenderTile {
   x: u32,
   y: u32,
   w: u32,
@@ -22,7 +24,37 @@ struct RenderTile {
   dirty: AtomicBool,
 }
 
-pub struct Renderer {
+impl RenderTile {
+  pub fn x(&self) -> u32 {
+    self.x
+  }
+  pub fn y(&self) -> u32 {
+    self.y
+  }
+  pub fn w(&self) -> u32 {
+    self.w
+  }
+  pub fn h(&self) -> u32 {
+    self.h
+  }
+
+  pub fn out_buf(&self) -> MutexGuard<Vec<Pixel>> {
+    self.out_buf.lock().unwrap()
+  }
+
+  pub fn cx(&self) -> u32 {
+    self.x + self.w / 2
+  }
+
+  pub fn cy(&self) -> u32 {
+    self.y + self.h / 2
+  }
+}
+
+pub struct Renderer<F>
+where
+  F: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
+{
   njobs: usize,
   w: u32,
   h: u32,
@@ -30,10 +62,14 @@ pub struct Renderer {
   tile_h: u32,
   tiles: Vec<Arc<RenderTile>>,
   worker: Option<ThreadPool<Arc<RenderTile>>>,
+  callback: F,
 }
 
-impl Renderer {
-  pub fn new(tile_w: u32, tile_h: u32, njobs: usize) -> Self {
+impl<F> Renderer<F>
+where
+  F: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
+{
+  pub fn new(tile_w: u32, tile_h: u32, njobs: usize, callback: F) -> Self {
     Self {
       njobs,
       w: 0,
@@ -42,29 +78,44 @@ impl Renderer {
       tile_h,
       tiles: Vec::new(),
       worker: None,
+      callback,
     }
   }
 
   fn update_ordering(&mut self) {
-    self
-      .tiles
-      .sort_by(|a, b| a.y.cmp(&b.y).then_with(|| a.x.cmp(&b.x)));
+    let cx = (self.w / 2) as f32;
+    let cy = (self.h / 2) as f32;
+
+    self.tiles.sort_by(|a, b| {
+      let da = (((a.cx() as f32 - cx).powi(2) + (a.cy() as f32 - cy).powi(2))
+        as f32)
+        .sqrt();
+      let db = (((b.cx() as f32 - cx).powi(2) + (b.cy() as f32 - cy).powi(2))
+        as f32)
+        .sqrt();
+
+      da.partial_cmp(&db)
+        .unwrap()
+        .then_with(|| a.y.cmp(&b.y).then_with(|| a.x.cmp(&b.x)))
+    });
   }
 
   fn begin_render(&mut self) {
     self.worker = Some(ThreadPool::new(
-      (0..self.njobs).map(|_| ()),
-      |_id, _, tile: Arc<RenderTile>| {
-        println!("{}: {}x{}", _id, tile.x, tile.y);
-
+      (0..self.njobs).map(|_| self.callback.clone()),
+      |_id, callback, tile: Arc<RenderTile>| {
         // TODO: is this the right ordering?
         if tile.dirty.swap(false, Ordering::SeqCst) {
-          let mut out = tile.out_buf.lock().unwrap();
+          {
+            let mut out = tile.out_buf.lock().unwrap();
 
-          // TODO: put the render function here
-          for i in 0..tile.in_buf.len() {
-            out[i] = tile.in_buf[i];
+            // TODO: put the render function here
+            for i in 0..tile.in_buf.len() {
+              out[i] = tile.in_buf[i];
+            }
           }
+
+          callback(tile);
         }
       },
     ));
@@ -89,12 +140,16 @@ impl Renderer {
     }
   }
 
-  fn rerender(&mut self) {
+  fn abort_render(&mut self) -> bool {
     for tile in &self.tiles {
       tile.dirty.store(false, Ordering::SeqCst); // TODO: is this the right ordering?
     }
 
-    self.join_render();
+    self.join_render()
+  }
+
+  pub fn rerender(&mut self) {
+    self.abort_render();
     self.begin_render();
   }
 
@@ -118,8 +173,6 @@ impl Renderer {
 
     self.tiles = (0..tiles_y)
       .flat_map(|r| {
-        println!("row: {}", r);
-
         let y = r * self.tile_h;
         let h = cmp::min(self.tile_h, self.h - y);
 
@@ -201,5 +254,14 @@ impl Renderer {
     }
 
     return Some(img);
+  }
+}
+
+impl<F> Drop for Renderer<F>
+where
+  F: Fn(Arc<RenderTile>) + Clone + Send + 'static,
+{
+  fn drop(&mut self) {
+    self.abort_render();
   }
 }

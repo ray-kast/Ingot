@@ -1,6 +1,7 @@
 // TODO: add a README
 
 extern crate gdk_pixbuf;
+extern crate glib;
 extern crate gtk;
 extern crate image;
 extern crate nalgebra;
@@ -37,7 +38,19 @@ use gtk::{
 };
 use image::{DynamicImage, GenericImageView};
 use render::Renderer;
-use std::{cell::RefCell, rc::Rc};
+use std::{
+  cell::RefCell,
+  rc::Rc,
+  sync::{Arc, Mutex},
+};
+
+// NB: I'm only doing this because these types are only accessed either directly
+//     on the main thread, or inside an idle callback
+struct DangerPixbuf(Pixbuf);
+struct DangerImage(gtk::Image);
+
+unsafe impl Send for DangerPixbuf {}
+unsafe impl Send for DangerImage {}
 
 fn main() {
   // TODO: create a GTK Application
@@ -51,15 +64,54 @@ fn main() {
   let win =
     Rc::new(RefCell::new(builder.get_object::<Window>("_root").unwrap()));
 
-  let image_preview = Rc::new(RefCell::new(
+  let image_preview = Arc::new(Mutex::new(DangerImage(
     builder.get_object::<gtk::Image>("image_preview").unwrap(),
-  ));
+  )));
 
   let in_img = Rc::new(RefCell::new(None as Option<DynamicImage>));
-  let buf = Rc::new(RefCell::new(None as Option<Pixbuf>));
+  let buf = Arc::new(Mutex::new(None as Option<DangerPixbuf>));
 
   // TODO: make these configurable
-  let renderer = Rc::new(RefCell::new(Renderer::new(64, 64, 10)));
+  let renderer = Rc::new(RefCell::new(Renderer::new(
+    64,
+    64,
+    10,
+    autoclone!(image_preview, buf => move |tile| {
+      glib::idle_add(autoclone!(image_preview, buf => move || {
+        let out_buf = buf.lock().unwrap();
+
+        let out_buf = match &*out_buf {
+          Some(b) => &b.0,
+          None => return Continue(false),
+        };
+
+        let image_preview = &image_preview.lock().unwrap().0;
+
+        let tile_buf = tile.out_buf();
+
+        for r in 0..tile.h() {
+          let r_stride = r * tile.w();
+
+          for c in 0..tile.w() {
+            let px = tile_buf[(r_stride + c) as usize];
+
+            out_buf.put_pixel(
+              (tile.x() + c) as i32,
+              (tile.y() + r) as i32,
+              (px[0] * 255.0).round() as u8,
+              (px[1] * 255.0).round() as u8,
+              (px[2] * 255.0).round() as u8,
+              (px[3] * 255.0).round() as u8
+            );
+          }
+        }
+
+        image_preview.set_from_pixbuf(Some(out_buf));
+
+        Continue(false)
+      }));
+    }),
+  )));
 
   let open_btn: Button = builder.get_object("open_btn").unwrap();
   let save_btn: Button = builder.get_object("save_btn").unwrap();
@@ -121,20 +173,20 @@ fn main() {
 
       println!("  done");
 
-      let mut buf = buf.borrow_mut();
+      let mut buf = buf.lock().unwrap();
 
       let img = img.as_ref().unwrap();
 
-      *buf = Some(Pixbuf::new(
+      *buf = Some(DangerPixbuf(Pixbuf::new(
         Colorspace::Rgb,
         true,
         8,
         img.width() as i32,
         img.height() as i32
-      ));
+      )));
 
-      let image_preview = image_preview.borrow_mut();
-      let buf = buf.as_ref().unwrap();
+      let image_preview = &image_preview.lock().unwrap().0;
+      let buf = &buf.as_ref().unwrap().0;
 
       image_preview.set_from_pixbuf(Some(buf));
 
