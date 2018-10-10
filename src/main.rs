@@ -1,6 +1,12 @@
+// TODO: add a README
+
 extern crate gdk_pixbuf;
 extern crate gtk;
 extern crate image;
+extern crate nalgebra;
+
+mod render;
+mod thread_pool;
 
 macro_rules! autoclone {
   (@param _) => (_);
@@ -30,6 +36,7 @@ use gtk::{
   ResponseType, Window,
 };
 use image::{DynamicImage, GenericImageView};
+use render::Renderer;
 use std::{cell::RefCell, rc::Rc};
 
 fn main() {
@@ -49,8 +56,10 @@ fn main() {
   ));
 
   let in_img = Rc::new(RefCell::new(None as Option<DynamicImage>));
-  let out_img = Rc::new(RefCell::new(None as Option<DynamicImage>));
   let buf = Rc::new(RefCell::new(None as Option<Pixbuf>));
+
+  // TODO: make these configurable
+  let renderer = Rc::new(RefCell::new(Renderer::new(64, 64, 10)));
 
   let open_btn: Button = builder.get_object("open_btn").unwrap();
   let save_btn: Button = builder.get_object("save_btn").unwrap();
@@ -62,7 +71,7 @@ fn main() {
     Inhibit(false)
   });
 
-  open_btn.connect_clicked(autoclone!(win, in_img, out_img => move |_| {
+  open_btn.connect_clicked(autoclone!(win, in_img, renderer => move |_| {
     let dlg = FileChooserDialog::new(
       Some("Open File"),
       Some(&*win.borrow_mut()),
@@ -75,7 +84,15 @@ fn main() {
     ]);
 
     dlg.set_modal(true);
-    dlg.run();
+
+    match ResponseType::from(dlg.run()) {
+      ResponseType::Accept => {}
+      _ => {
+        println!("aborting open");
+        dlg.destroy();
+        return;
+      }
+    }
 
     let files = dlg.get_filenames();
 
@@ -84,25 +101,37 @@ fn main() {
     if files.is_empty() {
       return;
     } else if files.len() > 1 {
-      println!("too many files"); // TODO: make this a dialog box, maybe?
+      println!("too many files");
 
       return;
     }
 
-    gtk::idle_add(autoclone!(in_img, out_img, buf, image_preview => move || {
+    gtk::idle_add(autoclone!(image_preview, in_img, buf, renderer => move || {
       let mut img = in_img.borrow_mut();
 
       println!("loading {:?}", files[0]);
 
-      *img = Some(image::open(files[0].as_path()).unwrap());
+      *img = Some(match image::open(files[0].as_path()) {
+        Ok(i) => i,
+        Err(e) => {
+          println!("  image failed to load: {:?}", e);
+          return Continue(false);
+        }
+      });
 
-      println!("loaded {:?}", files[0]);
+      println!("  done");
 
       let mut buf = buf.borrow_mut();
 
       let img = img.as_ref().unwrap();
 
-      *buf = Some(Pixbuf::new(Colorspace::Rgb, true, 8, img.width() as i32, img.height() as i32));
+      *buf = Some(Pixbuf::new(
+        Colorspace::Rgb,
+        true,
+        8,
+        img.width() as i32,
+        img.height() as i32
+      ));
 
       let image_preview = image_preview.borrow_mut();
       let buf = buf.as_ref().unwrap();
@@ -117,20 +146,20 @@ fn main() {
         }
       }
 
-      {
-        let mut oimg = out_img.borrow_mut();
+      println!("  done");
 
-        *oimg = Some(img.clone());
-      }
+      println!("initializing renderer...");
 
-      println!("pixbuf cleared");
+      renderer.borrow_mut().read_input(img);
+
+      println!("  done");
 
       Continue(false)
     }));
   }));
 
-  save_btn.connect_clicked(autoclone!(win, out_img => move |_| {
-    let img = out_img.borrow_mut();
+  save_btn.connect_clicked(autoclone!(win, renderer => move |_| {
+    let img = renderer.borrow_mut().get_output();
 
     if img.is_some() {
       let dlg = FileChooserDialog::new(
@@ -146,7 +175,15 @@ fn main() {
 
       dlg.set_do_overwrite_confirmation(true);
       dlg.set_modal(true);
-      dlg.run();
+
+      match ResponseType::from(dlg.run()) {
+        ResponseType::Accept => {}
+        _ => {
+          println!("aborting save");
+          dlg.destroy();
+          return;
+        }
+      }
 
       let files = dlg.get_filenames();
 
@@ -160,17 +197,15 @@ fn main() {
         return;
       }
 
-      gtk::idle_add(autoclone!(out_img => move || {
-        let img = out_img.borrow_mut();
-
+      gtk::idle_add(move || {
         println!("saving {:?}", files[0]);
 
         img.as_ref().unwrap().save(files[0].clone()).unwrap();
 
-        println!("saved {:?}", files[0]);
+        println!(" done");
 
         Continue(false)
-      }));
+      });
     }
   }));
 
