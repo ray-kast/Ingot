@@ -41,6 +41,14 @@ impl Tile {
 
   // TODO: this can't handle pixels outside the tile
   pub fn get_input(&self, x: u32, y: u32) -> Pixel {
+    if x >= self.w {
+      panic!("x value {} out-of-bounds", x);
+    }
+
+    if y >= self.h {
+      panic!("y value {} out-of-bounds", y);
+    }
+
     self.in_buf[((self.y + y) * self.in_stride + self.x + x) as usize]
   }
 

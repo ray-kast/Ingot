@@ -34,8 +34,8 @@ macro_rules! autoclone {
 
 use gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk::{
-  prelude::*, Builder, Button, ComboBoxText, FileChooserAction,
-  FileChooserDialog, ListStore, ResponseType, Type as GType, Window,
+  prelude::*, AccelFlags, AccelGroup, Builder, Button, ComboBoxText,
+  FileChooserAction, FileChooserDialog, HeaderBar, ResponseType, Window,
 };
 use image::{DynamicImage, GenericImageView};
 use render::{DummyRenderProc, RenderProc, Renderer};
@@ -65,6 +65,9 @@ fn main() {
 
   let win =
     Rc::new(RefCell::new(builder.get_object::<Window>("_root").unwrap()));
+
+  let win_accel_group: AccelGroup =
+    builder.get_object("_root_accel_group").unwrap();
 
   let image_preview = Arc::new(Mutex::new(DangerImage(
     builder.get_object::<gtk::Image>("image_preview").unwrap(),
@@ -116,6 +119,10 @@ fn main() {
     }),
   )));
 
+  let header = Rc::new(RefCell::new(
+    builder.get_object::<HeaderBar>("header").unwrap(),
+  ));
+
   let open_btn: Button = builder.get_object("open_btn").unwrap();
   let save_btn: Button = builder.get_object("save_btn").unwrap();
 
@@ -158,94 +165,111 @@ fn main() {
       gtk::main_quit();
       Inhibit(false)
     });
+
+    let (key, mods) = gtk::accelerator_parse("<Control>q");
+
+    // TODO: how does this even work?
+    win.add_accelerator(
+      "unmap",
+      &win_accel_group,
+      key,
+      mods,
+      AccelFlags::VISIBLE,
+    );
   }
 
-  open_btn.connect_clicked(autoclone!(win, in_img, renderer => move |_| {
-    let dlg = FileChooserDialog::new(
-      Some("Open File"),
-      Some(&*win.borrow_mut()),
-      FileChooserAction::Open,
-    );
+  open_btn.connect_clicked(
+    autoclone!(win, in_img, renderer, header => move |_| {
+      let dlg = FileChooserDialog::new(
+        Some("Open File"),
+        Some(&*win.borrow_mut()),
+        FileChooserAction::Open,
+      );
 
-    dlg.add_buttons(&[
-      ("_Cancel", ResponseType::Cancel.into()),
-      ("_Open", ResponseType::Accept.into()),
-    ]);
+      dlg.add_buttons(&[
+        ("_Cancel", ResponseType::Cancel.into()),
+        ("_Open", ResponseType::Accept.into()),
+      ]);
 
-    dlg.set_modal(true);
+      dlg.set_modal(true);
 
-    match ResponseType::from(dlg.run()) {
-      ResponseType::Accept => {}
-      _ => {
-        println!("aborting open");
-        dlg.destroy();
+      match ResponseType::from(dlg.run()) {
+        ResponseType::Accept => {}
+        _ => {
+          println!("aborting open");
+          dlg.destroy();
+          return;
+        }
+      }
+
+      let files = dlg.get_filenames();
+
+      dlg.destroy();
+
+      if files.is_empty() {
+        return;
+      } else if files.len() > 1 {
+        println!("too many files");
+
         return;
       }
-    }
 
-    let files = dlg.get_filenames();
+      gtk::idle_add(autoclone!(image_preview, in_img, buf, renderer, header => move || {
+        let mut img = in_img.borrow_mut();
 
-    dlg.destroy();
+        println!("loading {:?}", files[0]);
 
-    if files.is_empty() {
-      return;
-    } else if files.len() > 1 {
-      println!("too many files");
+        *img = Some(match image::open(files[0].as_path()) {
+          Ok(i) => i,
+          Err(e) => {
+            println!("  image failed to load: {:?}", e);
+            return Continue(false);
+          }
+        });
 
-      return;
-    }
+        println!("  done");
 
-    gtk::idle_add(autoclone!(image_preview, in_img, buf, renderer => move || {
-      let mut img = in_img.borrow_mut();
+        let mut buf = buf.lock().unwrap();
 
-      println!("loading {:?}", files[0]);
+        let img = img.as_ref().unwrap();
 
-      *img = Some(match image::open(files[0].as_path()) {
-        Ok(i) => i,
-        Err(e) => {
-          println!("  image failed to load: {:?}", e);
-          return Continue(false);
+        *buf = Some(DangerPixbuf(Pixbuf::new(
+          Colorspace::Rgb,
+          true,
+          8,
+          img.width() as i32,
+          img.height() as i32
+        )));
+
+        let image_preview = &image_preview.lock().unwrap().0;
+        let buf = &buf.as_ref().unwrap().0;
+
+        image_preview.set_from_pixbuf(Some(buf));
+
+        println!("clearing pixbuf...");
+
+        for r in 0..img.height() {
+          for c in 0..img.width() {
+            buf.put_pixel(c as i32, r as i32, 0, 127, 0, 255);
+          }
         }
-      });
 
-      println!("  done");
+        println!("  done");
 
-      let mut buf = buf.lock().unwrap();
+        println!("initializing renderer...");
 
-      let img = img.as_ref().unwrap();
+        renderer.borrow_mut().read_input(img);
 
-      *buf = Some(DangerPixbuf(Pixbuf::new(
-        Colorspace::Rgb,
-        true,
-        8,
-        img.width() as i32,
-        img.height() as i32
-      )));
+        println!("  done");
 
-      let image_preview = &image_preview.lock().unwrap().0;
-      let buf = &buf.as_ref().unwrap().0;
+        let header = header.borrow_mut();
 
-      image_preview.set_from_pixbuf(Some(buf));
+        header.set_subtitle(files[0].to_str());
 
-      println!("clearing pixbuf...");
-
-      for r in 0..img.height() {
-        for c in 0..img.width() {
-          buf.put_pixel(c as i32, r as i32, 0, 127, 0, 255);
-        }
-      }
-
-      println!("  done");
-
-      println!("initializing renderer...");
-
-      renderer.borrow_mut().read_input(img);
-
-      println!("  done");
-
-      Continue(false)
-    }));
-  }));
+        Continue(false)
+      }));
+    }),
+  );
 
   save_btn.connect_clicked(autoclone!(win, renderer => move |_| {
     let img = renderer.borrow_mut().get_output();
