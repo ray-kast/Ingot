@@ -19,6 +19,7 @@ where
 enum SchedMessage {
   Sleep(usize),
   WakeAll,
+  ForceWakeAll,
   Stop,
 }
 
@@ -110,6 +111,14 @@ where
               }
             }
           }
+          SM::ForceWakeAll => {
+            for i in 0..workers.len() {
+              workers[i]
+                .1
+                .send(WM::Continue)
+                .expect("failed to force-send WM::Continue");
+            }
+          }
           SM::Stop => stopping = true,
         }
       }
@@ -137,10 +146,13 @@ where
       .send(SM::Stop)
       .expect("failed to send SM::Stop");
 
+    // NB: I'm not just using SM::WakeAll because if a worker panics, it will
+    //     never send its WM::Sleep message and will never be awoken, causing
+    //     ThreadPool::join to hang
     self
       .sched_tx
-      .send(SM::WakeAll)
-      .expect("failed to send SM::WakeAll");
+      .send(SM::ForceWakeAll)
+      .expect("failed to send SM::ForceWakeAll");
     self.sched_handle.join().expect("scheduler died");
   }
 }

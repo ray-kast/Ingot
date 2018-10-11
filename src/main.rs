@@ -136,6 +136,11 @@ fn main() {
 
     for (id, name, filt) in vec![
       ("none", "None", Arc::new(render::DummyRenderProc) as ArcProc),
+      // (
+      //   "panic",
+      //   "PANIC",
+      //   Arc::new(procs::PanicRenderProc) as ArcProc,
+      // ),
       (
         "invert",
         "Invert",
