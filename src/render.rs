@@ -14,17 +14,18 @@ use thread_pool::ThreadPool;
 pub type Quantum = f32;
 pub type Pixel = Vector4<Quantum>;
 
-pub struct RenderTile {
+pub struct Tile {
   x: u32,
   y: u32,
   w: u32,
   h: u32,
-  in_buf: Vec<Pixel>,
+  in_stride: u32,
+  in_buf: Arc<Vec<Pixel>>,
   out_buf: Mutex<Vec<Pixel>>,
   dirty: AtomicBool,
 }
 
-impl RenderTile {
+impl Tile {
   pub fn x(&self) -> u32 {
     self.x
   }
@@ -38,8 +39,9 @@ impl RenderTile {
     self.h
   }
 
-  pub fn in_buf(&self) -> &Vec<Pixel> {
-    &self.in_buf
+  // TODO: this can't handle pixels outside the tile
+  pub fn get_input(&self, x: u32, y: u32) -> Pixel {
+    self.in_buf[((self.y + y) * self.in_stride + self.x + x) as usize]
   }
 
   pub fn out_buf(&self) -> MutexGuard<Vec<Pixel>> {
@@ -56,27 +58,27 @@ impl RenderTile {
 }
 
 pub trait RenderProc {
-  fn process_tile(&self, tile: Arc<RenderTile>);
+  fn process_tile(&self, tile: Arc<Tile>);
 }
 
 pub struct Renderer<C>
 where
-  C: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
+  C: Fn(Arc<Tile>) -> () + Clone + Send + 'static,
 {
   njobs: usize,
   w: u32,
   h: u32,
   tile_w: u32,
   tile_h: u32,
-  tiles: Vec<Arc<RenderTile>>,
-  worker: Option<ThreadPool<Arc<RenderTile>>>,
+  tiles: Vec<Arc<Tile>>,
+  worker: Option<ThreadPool<Arc<Tile>>>,
   proc: Arc<RenderProc + Send + Sync>,
   callback: C,
 }
 
 impl<C> Renderer<C>
 where
-  C: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
+  C: Fn(Arc<Tile>) -> () + Clone + Send + 'static,
 {
   pub fn new<P>(
     tile_w: u32,
@@ -122,7 +124,7 @@ where
   fn begin_render(&mut self) {
     self.worker = Some(ThreadPool::new(
       (0..self.njobs).map(|_| (self.proc.clone(), self.callback.clone())),
-      |_id, (proc, callback), tile: Arc<RenderTile>| {
+      |_id, (proc, callback), tile: Arc<Tile>| {
         // TODO: is this the right ordering?
         if tile.dirty.swap(false, Ordering::SeqCst) {
           proc.process_tile(tile.clone());
@@ -183,6 +185,25 @@ where
     let tiles_y =
       self.h / self.tile_h + if self.h % self.tile_h > 0 { 1 } else { 0 };
 
+    let in_buf = Arc::new({
+      let mut in_buf = Vec::new();
+
+      for r in 0..self.h {
+        for c in 0..self.w {
+          let px = in_img.get_pixel(c, r).data;
+
+          in_buf.push(Vector4::new(
+            px[0] as Quantum / 255.0,
+            px[1] as Quantum / 255.0,
+            px[2] as Quantum / 255.0,
+            px[3] as Quantum / 255.0,
+          ));
+        }
+      }
+
+      in_buf
+    });
+
     self.tiles = (0..tiles_y)
       .flat_map(|r| {
         let y = r * self.tile_h;
@@ -192,34 +213,16 @@ where
           let x = c * self.tile_w;
           let w = cmp::min(self.tile_w, self.w - x);
 
-          let bufsize = w as usize * h as usize;
+          let out_buf: Vec<_> =
+            (0..h * w).map(|_| Pixel::new(0.0, 0.0, 0.0, 0.0)).collect();
 
-          let mut in_buf = Vec::with_capacity(bufsize);
-          let mut out_buf = Vec::with_capacity(bufsize);
-
-          let tile = in_img.view(x, y, w, h);
-
-          for i in 0..h {
-            for j in 0..w {
-              let px = tile.get_pixel(j, i).data;
-
-              in_buf.push(Vector4::new(
-                px[0] as Quantum / 255.0,
-                px[1] as Quantum / 255.0,
-                px[2] as Quantum / 255.0,
-                px[3] as Quantum / 255.0,
-              ));
-
-              out_buf.push(Vector4::new(0.0, 0.0, 0.0, 0.0));
-            }
-          }
-
-          Arc::new(RenderTile {
+          Arc::new(Tile {
             x,
             y,
             w,
             h,
-            in_buf,
+            in_stride: self.w,
+            in_buf: in_buf.clone(),
             out_buf: Mutex::new(out_buf),
             dirty: AtomicBool::new(false),
           })
@@ -231,10 +234,7 @@ where
     self.begin_render();
   }
 
-  pub fn set_proc<P>(&mut self, proc: Arc<P>)
-  where
-    P: RenderProc + Send + Sync + 'static,
-  {
+  pub fn set_proc(&mut self, proc: Arc<RenderProc + Send + Sync>) {
     self.proc = proc;
     self.rerender();
   }
@@ -275,7 +275,7 @@ where
 
 impl<C> Drop for Renderer<C>
 where
-  C: Fn(Arc<RenderTile>) + Clone + Send + 'static,
+  C: Fn(Arc<Tile>) + Clone + Send + 'static,
 {
   fn drop(&mut self) {
     self.abort_render();
@@ -285,12 +285,15 @@ where
 pub struct DummyRenderProc;
 
 impl RenderProc for DummyRenderProc {
-  fn process_tile(&self, tile: Arc<RenderTile>) {
-    let in_buf = tile.in_buf();
+  fn process_tile(&self, tile: Arc<Tile>) {
     let mut out_buf = tile.out_buf();
 
-    for i in 0..in_buf.len() {
-      out_buf[i] = in_buf[i];
+    for r in 0..tile.h {
+      let r_stride = r * tile.w;
+
+      for c in 0..tile.w {
+        out_buf[(r_stride + c) as usize] = tile.get_input(c, r);
+      }
     }
   }
 }

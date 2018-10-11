@@ -6,6 +6,7 @@ extern crate gtk;
 extern crate image;
 extern crate nalgebra;
 
+mod procs;
 mod render;
 mod thread_pool;
 
@@ -33,13 +34,14 @@ macro_rules! autoclone {
 
 use gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk::{
-  prelude::*, Builder, Button, FileChooserAction, FileChooserDialog,
-  ResponseType, Window,
+  prelude::*, Builder, Button, ComboBoxText, FileChooserAction,
+  FileChooserDialog, ListStore, ResponseType, Type as GType, Window,
 };
 use image::{DynamicImage, GenericImageView};
-use render::{DummyRenderProc, Renderer};
+use render::{DummyRenderProc, RenderProc, Renderer};
 use std::{
   cell::RefCell,
+  collections::HashMap,
   rc::Rc,
   sync::{Arc, Mutex},
 };
@@ -117,12 +119,46 @@ fn main() {
   let open_btn: Button = builder.get_object("open_btn").unwrap();
   let save_btn: Button = builder.get_object("save_btn").unwrap();
 
-  win.borrow_mut().show();
+  let filter_select: ComboBoxText =
+    builder.get_object("filter_select").unwrap();
 
-  win.borrow_mut().connect_delete_event(|_, _| {
-    gtk::main_quit();
-    Inhibit(false)
-  });
+  let filters = {
+    let mut filters = HashMap::new();
+
+    type ArcProc = Arc<RenderProc + Send + Sync>;
+
+    for (id, name, filt) in vec![
+      ("none", "None", Arc::new(render::DummyRenderProc) as ArcProc),
+      (
+        "invert",
+        "Invert",
+        Arc::new(procs::InvertRenderProc) as ArcProc,
+      ),
+      (
+        "glitch",
+        "Glitch",
+        Arc::new(procs::GlitchRenderProc::new()) as ArcProc,
+      ),
+    ] {
+      filter_select.append(id, name);
+      filters.insert(id, filt);
+    }
+
+    filters
+  };
+
+  filter_select.set_active_id("none");
+
+  {
+    let win = win.borrow_mut();
+
+    win.show(); // TODO: figure out why the startup notification has just "."
+
+    win.connect_delete_event(|_, _| {
+      gtk::main_quit();
+      Inhibit(false)
+    });
+  }
 
   open_btn.connect_clicked(autoclone!(win, in_img, renderer => move |_| {
     let dlg = FileChooserDialog::new(
@@ -260,6 +296,17 @@ fn main() {
         Continue(false)
       });
     }
+  }));
+
+  filter_select.connect_changed(autoclone!(renderer => move |el| {
+    let id = match el.get_active_id() {
+      Some(i) => i,
+      None => return,
+    };
+
+    let filter = filters.get(&id.as_str());
+
+    renderer.borrow_mut().set_proc(filter.unwrap().clone());
   }));
 
   gtk::main();
