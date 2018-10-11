@@ -1,25 +1,43 @@
-use render::{RenderProc, Tile};
-use std::sync::{Arc, RwLock};
+use super::prelude::*;
+use std::sync::RwLock;
 
 struct Data {
   w: u32,
   h: u32,
 }
 
-// TODO: make the axis configurable
-pub struct FlipRenderProc {
+struct Proc {
   data: RwLock<Data>,
 }
 
-impl FlipRenderProc {
+// TODO: make the axis configurable
+pub struct FlipFilter {
+  proc: Arc<Proc>,
+}
+
+impl FlipFilter {
   pub fn new() -> Self {
-    Self {
-      data: RwLock::new(Data { w: 0, h: 0 }),
+    FlipFilter {
+      proc: Arc::new(Proc {
+        data: RwLock::new(Data { w: 0, h: 0 }),
+      }),
     }
   }
 }
 
-impl RenderProc for FlipRenderProc {
+impl Filter for FlipFilter {
+  fn name(&self) -> &str {
+    "Flip"
+  }
+
+  fn params(&self) {}
+
+  fn proc(&self) -> ArcProc {
+    self.proc.clone() as ArcProc
+  }
+}
+
+impl RenderProc for Proc {
   fn begin(&self, w: u32, h: u32) {
     let mut data = self.data.write().unwrap();
 

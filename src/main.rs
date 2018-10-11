@@ -6,7 +6,7 @@ extern crate gtk;
 extern crate image;
 extern crate nalgebra;
 
-mod procs;
+mod filters;
 mod render;
 mod thread_pool;
 
@@ -32,13 +32,14 @@ macro_rules! autoclone {
   );
 }
 
+use filters::Filter;
 use gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk::{
   prelude::*, AccelFlags, AccelGroup, Builder, Button, ComboBoxText,
   FileChooserAction, FileChooserDialog, HeaderBar, ResponseType, Window,
 };
 use image::{DynamicImage, GenericImageView};
-use render::{DummyRenderProc, RenderProc, Renderer};
+use render::{DummyRenderProc, Renderer};
 use std::{
   cell::RefCell,
   collections::HashMap,
@@ -83,6 +84,7 @@ fn main() {
     10,
     Arc::new(DummyRenderProc),
     autoclone!(image_preview, buf => move |tile| {
+      // TODO: collect dirty tiles to avoid overloading the dispatcher
       glib::idle_add(autoclone!(image_preview, buf => move || {
         let out_buf = buf.lock().unwrap();
 
@@ -132,39 +134,34 @@ fn main() {
   let filters = {
     let mut filters = HashMap::new();
 
-    type ArcProc = Arc<RenderProc + Send + Sync>;
+    type ArcFilter = Arc<Filter + Send + Sync>;
 
-    for (id, name, filt) in vec![
-      ("none", "None", Arc::new(render::DummyRenderProc) as ArcProc),
-      // (
-      //   "panic",
-      //   "PANIC",
-      //   Arc::new(procs::PanicRenderProc) as ArcProc,
-      // ),
-      (
-        "flip",
-        "Flip",
-        Arc::new(procs::FlipRenderProc::new()) as ArcProc,
-      ),
-      (
-        "invert",
-        "Invert",
-        Arc::new(procs::InvertRenderProc) as ArcProc,
-      ),
-      (
-        "glitch",
-        "Glitch",
-        Arc::new(procs::GlitchRenderProc::new()) as ArcProc,
-      ),
-    ] {
-      filter_select.append(id, name);
-      filters.insert(id, filt);
+    fn flt<T>(f: T) -> ArcFilter
+    where
+      T: Filter + Send + Sync + 'static,
+    {
+      Arc::new(f) as ArcFilter
+    }
+
+    for (i, flt) in vec![
+      flt(filters::DummyFilter::new()),
+      // flt(filters::PanicFilter::new()),
+      flt(filters::FlipFilter::new()),
+      flt(filters::InvertFilter::new()),
+      flt(filters::GlitchFilter::new()),
+    ].into_iter()
+      .enumerate()
+    {
+      let id = i.to_string();
+
+      filter_select.append(id.as_str(), flt.name());
+      filters.insert(id, flt);
     }
 
     filters
   };
 
-  filter_select.set_active_id("none");
+  filter_select.set_active_id("0");
 
   {
     let win = win.borrow_mut();
@@ -338,9 +335,7 @@ fn main() {
       None => return,
     };
 
-    let filter = filters.get(&id.as_str());
-
-    renderer.borrow_mut().set_proc(filter.unwrap().clone());
+    renderer.borrow_mut().set_proc(filters[&id].proc().clone());
   }));
 
   gtk::main();
