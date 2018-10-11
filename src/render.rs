@@ -38,6 +38,10 @@ impl RenderTile {
     self.h
   }
 
+  pub fn in_buf(&self) -> &Vec<Pixel> {
+    &self.in_buf
+  }
+
   pub fn out_buf(&self) -> MutexGuard<Vec<Pixel>> {
     self.out_buf.lock().unwrap()
   }
@@ -51,9 +55,13 @@ impl RenderTile {
   }
 }
 
-pub struct Renderer<F>
+pub trait RenderProc {
+  fn process_tile(&self, tile: Arc<RenderTile>);
+}
+
+pub struct Renderer<C>
 where
-  F: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
+  C: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
 {
   njobs: usize,
   w: u32,
@@ -62,14 +70,24 @@ where
   tile_h: u32,
   tiles: Vec<Arc<RenderTile>>,
   worker: Option<ThreadPool<Arc<RenderTile>>>,
-  callback: F,
+  proc: Arc<RenderProc + Send + Sync>,
+  callback: C,
 }
 
-impl<F> Renderer<F>
+impl<C> Renderer<C>
 where
-  F: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
+  C: Fn(Arc<RenderTile>) -> () + Clone + Send + 'static,
 {
-  pub fn new(tile_w: u32, tile_h: u32, njobs: usize, callback: F) -> Self {
+  pub fn new<P>(
+    tile_w: u32,
+    tile_h: u32,
+    njobs: usize,
+    proc: Arc<P>,
+    callback: C,
+  ) -> Self
+  where
+    P: RenderProc + Send + Sync + 'static,
+  {
     Self {
       njobs,
       w: 0,
@@ -78,6 +96,7 @@ where
       tile_h,
       tiles: Vec::new(),
       worker: None,
+      proc,
       callback,
     }
   }
@@ -102,18 +121,11 @@ where
 
   fn begin_render(&mut self) {
     self.worker = Some(ThreadPool::new(
-      (0..self.njobs).map(|_| self.callback.clone()),
-      |_id, callback, tile: Arc<RenderTile>| {
+      (0..self.njobs).map(|_| (self.proc.clone(), self.callback.clone())),
+      |_id, (proc, callback), tile: Arc<RenderTile>| {
         // TODO: is this the right ordering?
         if tile.dirty.swap(false, Ordering::SeqCst) {
-          {
-            let mut out = tile.out_buf.lock().unwrap();
-
-            // TODO: put the render function here
-            for i in 0..tile.in_buf.len() {
-              out[i] = tile.in_buf[i];
-            }
-          }
+          proc.process_tile(tile.clone());
 
           callback(tile);
         }
@@ -219,6 +231,14 @@ where
     self.begin_render();
   }
 
+  pub fn set_proc<P>(&mut self, proc: Arc<P>)
+  where
+    P: RenderProc + Send + Sync + 'static,
+  {
+    self.proc = proc;
+    self.rerender();
+  }
+
   pub fn get_output(&mut self) -> Option<RgbaImage> {
     if self.tiles.is_empty() {
       return None;
@@ -228,7 +248,7 @@ where
 
     let mut img = RgbaImage::new(self.w, self.h);
 
-    for (i, tile) in self.tiles.iter().enumerate() {
+    for tile in &self.tiles {
       let buf = tile.out_buf.lock().unwrap();
 
       for r in 0..tile.h {
@@ -242,10 +262,6 @@ where
             (px[1] * 255.0).round() as u8,
             (px[2] * 255.0).round() as u8,
             (px[3] * 255.0).round() as u8,
-            // (c as Quantum / tile.w as Quantum * 255.0).round() as u8,
-            // (r as Quantum / tile.h as Quantum * 255.0).round() as u8,
-            // (i as Quantum / self.tiles.len() as Quantum * 255.0).round() as u8,
-            // 255,
           ];
 
           img.put_pixel(tile.x + c, tile.y + r, Rgba { data });
@@ -257,11 +273,24 @@ where
   }
 }
 
-impl<F> Drop for Renderer<F>
+impl<C> Drop for Renderer<C>
 where
-  F: Fn(Arc<RenderTile>) + Clone + Send + 'static,
+  C: Fn(Arc<RenderTile>) + Clone + Send + 'static,
 {
   fn drop(&mut self) {
     self.abort_render();
+  }
+}
+
+pub struct DummyRenderProc;
+
+impl RenderProc for DummyRenderProc {
+  fn process_tile(&self, tile: Arc<RenderTile>) {
+    let in_buf = tile.in_buf();
+    let mut out_buf = tile.out_buf();
+
+    for i in 0..in_buf.len() {
+      out_buf[i] = in_buf[i];
+    }
   }
 }

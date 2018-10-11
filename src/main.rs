@@ -37,7 +37,7 @@ use gtk::{
   ResponseType, Window,
 };
 use image::{DynamicImage, GenericImageView};
-use render::Renderer;
+use render::{DummyRenderProc, Renderer};
 use std::{
   cell::RefCell,
   rc::Rc,
@@ -76,6 +76,7 @@ fn main() {
     64,
     64,
     10,
+    Arc::new(DummyRenderProc),
     autoclone!(image_preview, buf => move |tile| {
       glib::idle_add(autoclone!(image_preview, buf => move || {
         let out_buf = buf.lock().unwrap();
