@@ -52,6 +52,14 @@ impl Tile {
     self.in_buf[((self.y + y) * self.in_stride + self.x + x) as usize]
   }
 
+  pub fn global_input(&self, x: u32, y: u32) -> Pixel {
+    if x >= self.in_stride {
+      panic!("x value {} out-of-bounds", x);
+    }
+
+    self.in_buf[(y * self.in_stride + x) as usize]
+  }
+
   pub fn out_buf(&self) -> MutexGuard<Vec<Pixel>> {
     self.out_buf.lock().unwrap()
   }
@@ -66,6 +74,8 @@ impl Tile {
 }
 
 pub trait RenderProc {
+  fn begin(&self, _w: u32, _h: u32) {}
+
   fn process_tile(&self, tile: Arc<Tile>);
 }
 
@@ -130,6 +140,8 @@ where
   }
 
   fn begin_render(&mut self) {
+    self.proc.begin(self.w, self.h);
+
     self.worker = Some(ThreadPool::new(
       (0..self.njobs).map(|_| (self.proc.clone(), self.callback.clone())),
       |_id, (proc, callback), tile: Arc<Tile>| {

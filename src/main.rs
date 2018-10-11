@@ -142,6 +142,11 @@ fn main() {
       //   Arc::new(procs::PanicRenderProc) as ArcProc,
       // ),
       (
+        "flip",
+        "Flip",
+        Arc::new(procs::FlipRenderProc::new()) as ArcProc,
+      ),
+      (
         "invert",
         "Invert",
         Arc::new(procs::InvertRenderProc) as ArcProc,
