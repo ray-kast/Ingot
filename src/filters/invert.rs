@@ -3,12 +3,14 @@ use super::prelude::*;
 struct Proc;
 
 pub struct InvertFilter {
+  params: Vec<Param>,
   proc: Arc<Proc>,
 }
 
 impl InvertFilter {
   pub fn new() -> Self {
-    InvertFilter {
+    Self {
+      params: Vec::new(),
       proc: Arc::new(Proc),
     }
   }
@@ -19,7 +21,9 @@ impl Filter for InvertFilter {
     "Invert"
   }
 
-  fn params(&self) {}
+  fn params(&self) -> &Vec<Param> {
+    &self.params
+  }
 
   fn proc(&self) -> ArcProc {
     self.proc.clone() as ArcProc

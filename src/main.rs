@@ -1,42 +1,25 @@
-// TODO: add a README
+// TODO: de-spaghettify this file
 
 extern crate gdk_pixbuf;
 extern crate glib;
 extern crate gtk;
 extern crate image;
 extern crate nalgebra;
+extern crate rand;
 
+#[macro_use]
+mod autoclone;
 mod filters;
+mod param_builder;
 mod render;
 mod thread_pool;
-
-macro_rules! autoclone {
-  (@param _) => (_);
-  (@param $x:ident) => ($x);
-
-  (move || $body:expr) => (move || $body);
-  (move |$($p:tt),+| $body:expr) => (move |$(autoclone!(@param $p),)+| $body);
-
-  ($($n:ident),+ => move || $body:expr) => (
-    {
-      $(let $n = $n.clone();)+
-      move || $body
-    }
-  );
-
-  ($($n:ident),+ => move |$($p:tt),+| $body:expr) => (
-    {
-      $(let $n = $n.clone();)+
-      move |$(autoclone!(@param $p),)+| $body
-    }
-  );
-}
 
 use filters::Filter;
 use gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk::{
-  prelude::*, AccelFlags, AccelGroup, Builder, Button, ComboBoxText,
-  FileChooserAction, FileChooserDialog, HeaderBar, ResponseType, Window,
+  prelude::*, AccelFlags, AccelGroup, Box as GBox, Builder, Button,
+  ComboBoxText, FileChooserAction, FileChooserDialog, HeaderBar, ResponseType,
+  Window,
 };
 use image::{DynamicImage, GenericImageView};
 use render::{DummyRenderProc, Renderer};
@@ -73,6 +56,11 @@ fn main() {
   let image_preview = Arc::new(Mutex::new(DangerImage(
     builder.get_object::<gtk::Image>("image_preview").unwrap(),
   )));
+
+  let filter_select: ComboBoxText =
+    builder.get_object("filter_select").unwrap();
+
+  let tool_box: GBox = builder.get_object("tool_box").unwrap();
 
   let in_img = Rc::new(RefCell::new(None as Option<DynamicImage>));
   let buf = Arc::new(Mutex::new(None as Option<DangerPixbuf>));
@@ -128,11 +116,10 @@ fn main() {
   let open_btn: Button = builder.get_object("open_btn").unwrap();
   let save_btn: Button = builder.get_object("save_btn").unwrap();
 
-  let filter_select: ComboBoxText =
-    builder.get_object("filter_select").unwrap();
-
   let filters = {
     let mut filters = HashMap::new();
+
+    // TODO: find a better way to collect all the filters into a list
 
     type ArcFilter = Arc<Filter + Send + Sync>;
 
@@ -161,7 +148,7 @@ fn main() {
     filters
   };
 
-  filter_select.set_active_id("0");
+  filter_select.set_active_id("0"); // TODO: this is kinda dumb and bad
 
   {
     let win = win.borrow_mut();
@@ -173,16 +160,16 @@ fn main() {
       Inhibit(false)
     });
 
-    let (key, mods) = gtk::accelerator_parse("<Control>q");
+    // let (key, mods) = gtk::accelerator_parse("<Control>q");
 
-    // TODO: how does this even work?
-    win.add_accelerator(
-      "unmap",
-      &win_accel_group,
-      key,
-      mods,
-      AccelFlags::VISIBLE,
-    );
+    // TODO: how does this even work? (I mean, it doesn't, but how to I make it work?)
+    // win.add_accelerator(
+    //   "unmap",
+    //   &win_accel_group,
+    //   key,
+    //   mods,
+    //   AccelFlags::VISIBLE,
+    // );
   }
 
   open_btn.connect_clicked(
@@ -335,7 +322,11 @@ fn main() {
       None => return,
     };
 
-    renderer.borrow_mut().set_proc(filters[&id].proc().clone());
+    let flt = &filters[&id];
+
+    renderer.borrow_mut().set_proc(flt.proc());
+
+    param_builder::build(&tool_box, flt.params(), &renderer);
   }));
 
   gtk::main();

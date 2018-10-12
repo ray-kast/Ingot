@@ -6,6 +6,7 @@ authors = ["rookie1024 <rookie1286@gmail.com>"]
 [dependencies]
 gdk-pixbuf = "0.5.0"
 glib = "0.6.0"
-gtk = { version = "0.5.0", features = ["v3_10"] }
+gtk = { version = "0.5.0", features = ["v3_14"] }
 image = "0.20.0"
 nalgebra = "0.16.4"
+rand = "0.5.5"

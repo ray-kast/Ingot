@@ -73,6 +73,7 @@ impl Tile {
   }
 }
 
+// TODO: add some kind of cancellation token, maybe?
 pub trait RenderProc {
   fn begin(&self, _w: u32, _h: u32) {}
 
