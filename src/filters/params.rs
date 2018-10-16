@@ -7,10 +7,8 @@ pub struct Param(pub String, pub ParamVal);
 
 pub enum ParamVal {
   Switch(Arc<SwitchParam>),
-  RangedI32(Arc<RangedParam<i32>>),
-  RangedI64(Arc<RangedParam<i64>>),
-  RangedF32(Arc<RangedParam<f32>>),
-  RangedF64(Arc<RangedParam<f64>>),
+  RangedInt(Arc<RangedParam<i32>>),
+  RangedFloat(Arc<RangedParam<f64>>),
 }
 
 use self::ParamVal::*;
@@ -23,25 +21,13 @@ impl From<Arc<SwitchParam>> for ParamVal {
 
 impl From<Arc<RangedParam<i32>>> for ParamVal {
   fn from(val: Arc<RangedParam<i32>>) -> Self {
-    RangedI32(val)
-  }
-}
-
-impl From<Arc<RangedParam<i64>>> for ParamVal {
-  fn from(val: Arc<RangedParam<i64>>) -> Self {
-    RangedI64(val)
-  }
-}
-
-impl From<Arc<RangedParam<f32>>> for ParamVal {
-  fn from(val: Arc<RangedParam<f32>>) -> Self {
-    RangedF32(val)
+    RangedInt(val)
   }
 }
 
 impl From<Arc<RangedParam<f64>>> for ParamVal {
   fn from(val: Arc<RangedParam<f64>>) -> Self {
-    RangedF64(val)
+    RangedFloat(val)
   }
 }
 
@@ -85,13 +71,7 @@ impl<T> RangedParam<T>
 where
   T: PartialOrd + Copy,
 {
-  pub fn new<IN, IX>(
-    default: T,
-    min: T,
-    max: T,
-    hard_min: IN,
-    hard_max: IX,
-  ) -> Self
+  pub fn new<IN, IX>(default: T, min: T, max: T, hard_min: IN, hard_max: IX) -> Self
   where
     Option<T>: From<IN>,
     Option<T>: From<IX>,
@@ -136,6 +116,18 @@ where
     }
 
     value.coerced = value.internal;
+  }
+
+  pub fn min(&self) -> T {
+    self.min
+  }
+
+  pub fn max(&self) -> T {
+    self.max
+  }
+
+  pub fn get(&self) -> T {
+    self.value.read().unwrap().coerced
   }
 
   pub fn set(&self, val: T) {

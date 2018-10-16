@@ -33,7 +33,7 @@ impl Filter for PanicFilter {
 }
 
 impl RenderProc for Proc {
-  fn process_tile(&self, _: Arc<Tile>) {
+  fn process_tile(&self, _: &Tile) {
     panic!("debug panic");
   }
 }

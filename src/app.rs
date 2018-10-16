@@ -10,7 +10,7 @@ use image;
 use image::{DynamicImage, GenericImageView};
 use num_cpus;
 use param_builder;
-use render::{DummyRenderProc, RenderCallback, Renderer, Tile};
+use render::{DummyRenderProc, RenderCallback, Renderer, TaggedTile, Tile};
 use std::{
   cell::RefCell,
   collections::HashMap,
@@ -383,13 +383,27 @@ impl App {
   }
 }
 
+struct AppRenderCallbackTag {
+  queued: AtomicBool,
+}
+
+impl Default for AppRenderCallbackTag {
+  fn default() -> Self {
+    Self {
+      queued: AtomicBool::new(false),
+    }
+  }
+}
+
+type AppTaggedTile = TaggedTile<AppRenderCallbackTag>;
+
 #[derive(Clone)]
 struct AppRenderCallback {
   running: Arc<AtomicBool>,
   image_preview: DangerImage,
   buf: Arc<Mutex<Option<DangerPixbuf>>>,
-  send: Sender<Arc<Tile>>,
-  recv: Arc<Mutex<Receiver<Arc<Tile>>>>,
+  send: Sender<Arc<AppTaggedTile>>,
+  recv: Arc<Mutex<Receiver<Arc<AppTaggedTile>>>>,
 }
 
 impl AppRenderCallback {
@@ -429,22 +443,26 @@ impl AppRenderCallback {
         for tile in recv.try_iter().take(500) {
           did_work = true;
 
-          let tile_buf = tile.out_buf();
+          if tile.tag().queued.swap(false, Ordering::SeqCst) {
+            let tile = tile.tile();
 
-          for r in 0..tile.h() {
-            let r_stride = r * tile.w();
+            let tile_buf = tile.out_buf();
 
-            for c in 0..tile.w() {
-              let px = tile_buf[(r_stride + c) as usize];
+            for r in 0..tile.h() {
+              let r_stride = r * tile.w();
 
-              out_buf.put_pixel(
-                (tile.x() + c) as i32,
-                (tile.y() + r) as i32,
-                (px[0] * 255.0).round() as u8,
-                (px[1] * 255.0).round() as u8,
-                (px[2] * 255.0).round() as u8,
-                (px[3] * 255.0).round() as u8,
-              );
+              for c in 0..tile.w() {
+                let px = tile_buf[(r_stride + c) as usize];
+
+                out_buf.put_pixel(
+                  (tile.x() + c) as i32,
+                  (tile.y() + r) as i32,
+                  (px[0] * 255.0).round() as u8,
+                  (px[1] * 255.0).round() as u8,
+                  (px[2] * 255.0).round() as u8,
+                  (px[3] * 255.0).round() as u8,
+                );
+              }
             }
           }
         }
@@ -462,8 +480,12 @@ impl AppRenderCallback {
 }
 
 impl RenderCallback for AppRenderCallback {
-  fn handle_tile(&self, tile: Arc<Tile>) {
-    self.send.send(tile).unwrap();
+  type Tag = AppRenderCallbackTag;
+
+  fn handle_tile(&self, tile: Arc<AppTaggedTile>) {
+    if !tile.tag().queued.swap(true, Ordering::SeqCst) {
+      self.send.send(tile).unwrap();
+    }
 
     if !self.running.swap(true, Ordering::SeqCst) {
       self.dispatch_worker();

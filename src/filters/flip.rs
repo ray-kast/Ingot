@@ -59,7 +59,7 @@ impl RenderProc for Proc {
     data.h = h;
   }
 
-  fn process_tile(&self, tile: Arc<Tile>) {
+  fn process_tile(&self, tile: &Tile) {
     let data = self.data.read().unwrap();
     let mut out_buf = tile.out_buf();
 

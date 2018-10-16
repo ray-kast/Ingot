@@ -1,14 +1,12 @@
 use filters::params::*;
-use gtk::{prelude::*, Box as GBox, Label, Orientation, Switch};
+use gtk::{prelude::*, Adjustment, Box as GBox, Label, Orientation, Scale, Switch};
 use render::{RenderCallback, Renderer};
 use std::{cell::RefCell, rc::Rc};
 
-pub fn build<C>(
-  tool_box: &GBox,
-  params: &Vec<Param>,
-  renderer: &Rc<RefCell<Renderer<C>>>,
-) where
+pub fn build<C>(tool_box: &GBox, params: &Vec<Param>, renderer: &Rc<RefCell<Renderer<C>>>)
+where
   C: RenderCallback + Clone + Send + 'static,
+  C::Tag: Default + Send + Sync,
 {
   for child in tool_box.get_children() {
     tool_box.remove(&child);
@@ -21,12 +19,10 @@ pub fn build<C>(
   tool_box.show_all();
 }
 
-fn build_param<C>(
-  tool_box: &GBox,
-  param: &Param,
-  renderer: &Rc<RefCell<Renderer<C>>>,
-) where
+fn build_param<C>(tool_box: &GBox, param: &Param, renderer: &Rc<RefCell<Renderer<C>>>)
+where
   C: RenderCallback + Clone + Send + 'static,
+  C::Tag: Default + Send + Sync,
 {
   use self::ParamVal as P;
 
@@ -56,9 +52,45 @@ fn build_param<C>(
         Inhibit(false)
       }));
     }
-    P::RangedI32(r) => (),
-    P::RangedI64(r) => (),
-    P::RangedF32(r) => (),
-    P::RangedF64(r) => (),
+    P::RangedInt(r) => (),
+    P::RangedFloat(r) => {
+      let (scl, adj) = create_ranged_numeric(tool_box, renderer, name);
+
+      scl.set_digits(-1);
+
+      adj.configure(r.get(), r.min(), r.max(), 0.0, 1.0, 0.0);
+
+      scl.connect_value_changed(autoclone!(renderer, r => move |scl| {
+        let val = scl.get_value();
+
+        r.set(val);
+
+        renderer.borrow_mut().rerender();
+      }));
+    }
   }
+}
+
+fn create_ranged_numeric<C>(
+  tool_box: &GBox,
+  renderer: &Rc<RefCell<Renderer<C>>>,
+  name: &str,
+) -> (Scale, Adjustment)
+where
+  C: RenderCallback + Clone + Send + 'static,
+  C::Tag: Default + Send + Sync,
+{
+  let label = Label::new(name);
+
+  tool_box.pack_start(&label, false, false, 0);
+
+  let scl = Scale::new(Orientation::Horizontal, None);
+
+  scl.set_draw_value(false);
+
+  tool_box.pack_start(&scl, false, false, 0);
+
+  let adj = scl.get_adjustment();
+
+  (scl, adj)
 }

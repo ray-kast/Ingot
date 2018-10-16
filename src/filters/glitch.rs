@@ -33,7 +33,7 @@ impl Filter for GlitchFilter {
 }
 
 impl RenderProc for Proc {
-  fn process_tile(&self, tile: Arc<Tile>) {
+  fn process_tile(&self, tile: &Tile) {
     let mut out_buf = tile.out_buf();
 
     for i in 0..out_buf.len() {

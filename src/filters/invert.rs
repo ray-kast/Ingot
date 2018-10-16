@@ -1,6 +1,8 @@
 use super::prelude::*;
 
-struct Proc;
+struct Proc {
+  param_amt: Arc<RangedParam<f64>>,
+}
 
 pub struct InvertFilter {
   params: Vec<Param>,
@@ -9,9 +11,11 @@ pub struct InvertFilter {
 
 impl InvertFilter {
   pub fn new() -> Self {
+    let param_amt = Arc::new(RangedParam::new(1.0, 0.0, 1.0, 0.0, 1.0));
+
     Self {
-      params: Vec::new(),
-      proc: Arc::new(Proc),
+      params: vec![Param("Amount".to_string(), param_amt.clone().into())],
+      proc: Arc::new(Proc { param_amt }),
     }
   }
 }
@@ -31,8 +35,10 @@ impl Filter for InvertFilter {
 }
 
 impl RenderProc for Proc {
-  fn process_tile(&self, tile: Arc<Tile>) {
+  fn process_tile(&self, tile: &Tile) {
     let mut out_buf = tile.out_buf();
+
+    let amt = self.param_amt.get() as f32;
 
     for r in 0..tile.h() {
       let r_stride = r * tile.w();
@@ -40,8 +46,9 @@ impl RenderProc for Proc {
       for c in 0..tile.w() {
         let px = tile.get_input(c, r);
 
-        out_buf[(r_stride + c) as usize] =
-          Pixel::new(1.0 - px[0], 1.0 - px[1], 1.0 - px[2], px[3]);
+        let flipped = Pixel::new(1.0 - px[0], 1.0 - px[1], 1.0 - px[2], px[3]);
+
+        out_buf[(r_stride + c) as usize] = flipped * amt + px * (1.0 - amt);
       }
     }
   }

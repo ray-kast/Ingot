@@ -22,7 +22,6 @@ pub struct Tile {
   in_stride: u32,
   in_buf: Arc<Vec<Pixel>>,
   out_buf: Mutex<Vec<Pixel>>,
-  dirty: AtomicBool,
 }
 
 impl Tile {
@@ -73,28 +72,55 @@ impl Tile {
   }
 }
 
+pub struct TaggedTile<T>
+where
+  T: Send + Sync,
+{
+  tile: Tile,
+  tag: T,
+  dirty: AtomicBool,
+}
+
+impl<T> TaggedTile<T>
+where
+  T: Send + Sync,
+{
+  pub fn tile(&self) -> &Tile {
+    &self.tile
+  }
+
+  pub fn tag(&self) -> &T {
+    &self.tag
+  }
+}
+
 // TODO: add some kind of cancellation token, maybe?
 pub trait RenderProc {
   fn begin(&self, _w: u32, _h: u32) {}
 
-  fn process_tile(&self, tile: Arc<Tile>);
+  fn process_tile(&self, tile: &Tile);
 }
 
 pub trait RenderCallback {
-  fn handle_tile(&self, tile: Arc<Tile>);
+  type Tag;
+
+  fn handle_tile(&self, tile: Arc<TaggedTile<Self::Tag>>)
+  where
+    Self::Tag: Send + Sync;
 }
 
 pub struct Renderer<C>
 where
   C: RenderCallback + Clone + Send + 'static,
+  C::Tag: Default + Send + Sync,
 {
   njobs: usize,
   w: u32,
   h: u32,
   tile_w: u32,
   tile_h: u32,
-  tiles: Vec<Arc<Tile>>,
-  worker: Option<ThreadPool<Arc<Tile>>>,
+  tiles: Vec<Arc<TaggedTile<C::Tag>>>,
+  worker: Option<ThreadPool<Arc<TaggedTile<C::Tag>>>>,
   proc: Arc<RenderProc + Send + Sync>,
   callback: C,
 }
@@ -102,14 +128,9 @@ where
 impl<C> Renderer<C>
 where
   C: RenderCallback + Clone + Send + 'static,
+  C::Tag: Default + Send + Sync,
 {
-  pub fn new<P>(
-    tile_w: u32,
-    tile_h: u32,
-    njobs: usize,
-    proc: Arc<P>,
-    callback: C,
-  ) -> Self
+  pub fn new<P>(tile_w: u32, tile_h: u32, njobs: usize, proc: Arc<P>, callback: C) -> Self
   where
     P: RenderProc + Send + Sync + 'static,
   {
@@ -131,12 +152,11 @@ where
     let cy = (self.h / 2) as f32;
 
     self.tiles.sort_by(|a, b| {
-      let da = (((a.cx() as f32 - cx).powi(2) + (a.cy() as f32 - cy).powi(2))
-        as f32)
-        .sqrt();
-      let db = (((b.cx() as f32 - cx).powi(2) + (b.cy() as f32 - cy).powi(2))
-        as f32)
-        .sqrt();
+      let a = a.tile();
+      let b = b.tile();
+
+      let da = (((a.cx() as f32 - cx).powi(2) + (a.cy() as f32 - cy).powi(2)) as f32).sqrt();
+      let db = (((b.cx() as f32 - cx).powi(2) + (b.cy() as f32 - cy).powi(2)) as f32).sqrt();
 
       da.partial_cmp(&db)
         .unwrap()
@@ -149,10 +169,10 @@ where
 
     self.worker = Some(ThreadPool::new(
       (0..self.njobs).map(|_| (self.proc.clone(), self.callback.clone())),
-      |_id, (proc, callback), tile: Arc<Tile>| {
+      |_id, (proc, callback), tile: Arc<TaggedTile<C::Tag>>| {
         // TODO: is this the right ordering?
         if tile.dirty.swap(false, Ordering::SeqCst) {
-          proc.process_tile(tile.clone());
+          proc.process_tile(&tile.tile);
 
           callback.handle_tile(tile);
         }
@@ -205,10 +225,8 @@ where
     self.w = in_img.width();
     self.h = in_img.height();
 
-    let tiles_x =
-      self.w / self.tile_w + if self.w % self.tile_w > 0 { 1 } else { 0 };
-    let tiles_y =
-      self.h / self.tile_h + if self.h % self.tile_h > 0 { 1 } else { 0 };
+    let tiles_x = self.w / self.tile_w + if self.w % self.tile_w > 0 { 1 } else { 0 };
+    let tiles_y = self.h / self.tile_h + if self.h % self.tile_h > 0 { 1 } else { 0 };
 
     let in_buf = Arc::new({
       let mut in_buf = Vec::new();
@@ -238,17 +256,19 @@ where
           let x = c * self.tile_w;
           let w = cmp::min(self.tile_w, self.w - x);
 
-          let out_buf: Vec<_> =
-            (0..h * w).map(|_| Pixel::new(0.0, 0.0, 0.0, 0.0)).collect();
+          let out_buf: Vec<_> = (0..h * w).map(|_| Pixel::new(0.0, 0.0, 0.0, 0.0)).collect();
 
-          Arc::new(Tile {
-            x,
-            y,
-            w,
-            h,
-            in_stride: self.w,
-            in_buf: in_buf.clone(),
-            out_buf: Mutex::new(out_buf),
+          Arc::new(TaggedTile {
+            tile: Tile {
+              x,
+              y,
+              w,
+              h,
+              in_stride: self.w,
+              in_buf: in_buf.clone(),
+              out_buf: Mutex::new(out_buf),
+            },
+            tag: Default::default(),
             dirty: AtomicBool::new(false),
           })
         })
@@ -274,6 +294,8 @@ where
     let mut img = RgbaImage::new(self.w, self.h);
 
     for tile in &self.tiles {
+      let tile = &tile.tile;
+
       let buf = tile.out_buf.lock().unwrap();
 
       for r in 0..tile.h {
@@ -301,6 +323,7 @@ where
 impl<C> Drop for Renderer<C>
 where
   C: RenderCallback + Clone + Send + 'static,
+  C::Tag: Default + Send + Sync,
 {
   fn drop(&mut self) {
     self.abort_render();
@@ -310,7 +333,7 @@ where
 pub struct DummyRenderProc;
 
 impl RenderProc for DummyRenderProc {
-  fn process_tile(&self, tile: Arc<Tile>) {
+  fn process_tile(&self, tile: &Tile) {
     let mut out_buf = tile.out_buf();
 
     for r in 0..tile.h {

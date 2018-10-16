@@ -3,11 +3,6 @@
 <interface>
   <requires lib="gtk+" version="3.20"/>
   <object class="GtkAccelGroup" id="_root_accel_group"/>
-  <object class="GtkAdjustment" id="adjustment1">
-    <property name="upper">100</property>
-    <property name="step_increment">1</property>
-    <property name="page_increment">10</property>
-  </object>
   <object class="GtkApplicationWindow" id="_root">
     <property name="width_request">640</property>
     <property name="height_request">480</property>
@@ -127,7 +122,8 @@
                               <object class="GtkLabel">
                                 <property name="visible">True</property>
                                 <property name="can_focus">False</property>
-                                <property name="label" translatable="yes">Slider</property>
+                                <property name="label" translatable="yes">&lt;i&gt;you can't see me&lt;/i&gt;</property>
+                                <property name="use_markup">True</property>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
@@ -136,17 +132,7 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkScale">
-                                <property name="visible">True</property>
-                                <property name="can_focus">True</property>
-                                <property name="adjustment">adjustment1</property>
-                                <property name="draw_value">False</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                                <property name="position">1</property>
-                              </packing>
+                              <placeholder/>
                             </child>
                             <child>
                               <placeholder/>
