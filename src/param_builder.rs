@@ -1,14 +1,14 @@
 use filters::params::*;
 use gtk::{prelude::*, Box as GBox, Label, Orientation, Switch};
-use render::{Renderer, Tile};
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use render::{RenderCallback, Renderer};
+use std::{cell::RefCell, rc::Rc};
 
 pub fn build<C>(
   tool_box: &GBox,
   params: &Vec<Param>,
   renderer: &Rc<RefCell<Renderer<C>>>,
 ) where
-  C: Fn(Arc<Tile>) -> () + Clone + Send + 'static,
+  C: RenderCallback + Clone + Send + 'static,
 {
   for child in tool_box.get_children() {
     tool_box.remove(&child);
@@ -26,7 +26,7 @@ fn build_param<C>(
   param: &Param,
   renderer: &Rc<RefCell<Renderer<C>>>,
 ) where
-  C: Fn(Arc<Tile>) -> () + Clone + Send + 'static,
+  C: RenderCallback + Clone + Send + 'static,
 {
   use self::ParamVal as P;
 

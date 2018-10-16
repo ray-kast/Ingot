@@ -80,9 +80,13 @@ pub trait RenderProc {
   fn process_tile(&self, tile: Arc<Tile>);
 }
 
+pub trait RenderCallback {
+  fn handle_tile(&self, tile: Arc<Tile>);
+}
+
 pub struct Renderer<C>
 where
-  C: Fn(Arc<Tile>) -> () + Clone + Send + 'static,
+  C: RenderCallback + Clone + Send + 'static,
 {
   njobs: usize,
   w: u32,
@@ -97,7 +101,7 @@ where
 
 impl<C> Renderer<C>
 where
-  C: Fn(Arc<Tile>) -> () + Clone + Send + 'static,
+  C: RenderCallback + Clone + Send + 'static,
 {
   pub fn new<P>(
     tile_w: u32,
@@ -150,7 +154,7 @@ where
         if tile.dirty.swap(false, Ordering::SeqCst) {
           proc.process_tile(tile.clone());
 
-          callback(tile);
+          callback.handle_tile(tile);
         }
       },
     ));
@@ -296,7 +300,7 @@ where
 
 impl<C> Drop for Renderer<C>
 where
-  C: Fn(Arc<Tile>) + Clone + Send + 'static,
+  C: RenderCallback + Clone + Send + 'static,
 {
   fn drop(&mut self) {
     self.abort_render();
