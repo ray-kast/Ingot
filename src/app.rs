@@ -3,8 +3,8 @@ use gdk_pixbuf::{Colorspace, Pixbuf};
 use glib::{self, WeakRef};
 use gtk::{
   self, prelude::*, AccelFlags, AccelGroup, Application, ApplicationWindow, Box as GBox, Builder,
-  Button, ComboBoxText, FileChooserAction, FileChooserDialog, HeaderBar, Image as GImage,
-  ResponseType, Window,
+  Button, ButtonsType, ComboBoxText, DialogFlags, FileChooserAction, FileChooserDialog, HeaderBar,
+  Image as GImage, MessageDialog, MessageType, ResponseType, Window,
 };
 use image;
 use image::{DynamicImage, GenericImageView};
@@ -48,6 +48,7 @@ where
 pub struct App {
   win: ApplicationWindow,
   header: HeaderBar,
+  save_btn: Button,
   image_preview: GImage,
   tool_box: GBox,
   in_img: Rc<RefCell<Option<DynamicImage>>>,
@@ -106,6 +107,7 @@ impl App {
     let ret = Self {
       win,
       header,
+      save_btn: save_btn.clone(),
       image_preview,
       tool_box,
       in_img: Rc::new(RefCell::new(None)),
@@ -199,6 +201,17 @@ impl App {
     files
   }
 
+  fn modal_message<W>(parent: Option<&W>, msg: &str, msg_type: MessageType)
+  where
+    W: IsA<Window>,
+  {
+    let dlg = MessageDialog::new(parent, DialogFlags::MODAL, msg_type, ButtonsType::Ok, msg);
+
+    dlg.run();
+
+    dlg.destroy();
+  }
+
   fn init(
     &self,
     open_btn: Button,
@@ -245,6 +258,7 @@ impl App {
       let image_preview = self.image_preview.downgrade();
       let renderer = self.renderer.clone();
       let header = self.header.downgrade();
+      let save_btn = self.save_btn.downgrade();
 
       move |_| {
         let win = win.upgrade().unwrap();
@@ -263,6 +277,7 @@ impl App {
           let image_preview = image_preview.clone();
           let renderer = renderer.clone();
           let header = header.clone();
+          let save_btn = save_btn.clone();
 
           move || {
             let mut img = in_img.borrow_mut();
@@ -272,7 +287,14 @@ impl App {
             *img = Some(match image::open(files[0].as_path()) {
               Ok(i) => i,
               Err(e) => {
-                println!("  image failed to load: {:?}", e);
+                println!("  failed to read image: {:?}", e);
+
+                App::modal_message(
+                  Some(&win),
+                  &format!("Couldn't open image: {}", e),
+                  MessageType::Error,
+                );
+
                 return Continue(false);
               }
             });
@@ -313,8 +335,11 @@ impl App {
             println!("  done");
 
             let header = header.upgrade().unwrap();
+            let save_btn = save_btn.upgrade().unwrap();
 
             header.set_subtitle(files[0].to_str());
+
+            save_btn.set_sensitive(true);
 
             Continue(false)
           }
@@ -347,7 +372,21 @@ impl App {
             move || {
               println!("saving {:?}", files[0]);
 
-              img.as_ref().unwrap().save(files[0].clone()).unwrap();
+              match img.as_ref().unwrap().save(files[0].clone()) {
+                Ok(_) => (),
+                Err(e) => {
+                  println!("  failed to write image: {:?}", e);
+
+                  App::modal_message(
+                    Some(&win),
+                    &format!("Couldn't save image: {}", e),
+                    MessageType::Error,
+                  );
+
+                  // TODO: delete any accidentally created files
+                  return Continue(false);
+                }
+              }
 
               println!("  done");
 
