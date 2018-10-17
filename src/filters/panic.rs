@@ -33,7 +33,8 @@ impl Filter for PanicFilter {
 }
 
 impl RenderProc for Proc {
-  fn process_tile(&self, _: &Tile) {
+  // Heaven forbid we ignore a cancel request while we're panicking!
+  fn process_tile(&self, _: &Tile, _: &CancelTok) {
     panic!("debug panic");
   }
 }

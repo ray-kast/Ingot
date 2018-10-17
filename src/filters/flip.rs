@@ -12,7 +12,6 @@ struct Proc {
   param_flipy: Arc<BoolParam>,
 }
 
-// TODO: make the axis configurable
 pub struct FlipFilter {
   params: Vec<Param>,
   proc: Arc<Proc>,
@@ -59,7 +58,8 @@ impl RenderProc for Proc {
     data.h = h;
   }
 
-  fn process_tile(&self, tile: &Tile) {
+  // This is fast enough that we can ignore the cancellation token
+  fn process_tile(&self, tile: &Tile, _: &CancelTok) {
     let data = self.data.read().unwrap();
     let mut out_buf = tile.out_buf();
 

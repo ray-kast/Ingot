@@ -35,7 +35,8 @@ impl Filter for InvertFilter {
 }
 
 impl RenderProc for Proc {
-  fn process_tile(&self, tile: &Tile) {
+  // This is fast enough that we can ignore the cancellation token
+  fn process_tile(&self, tile: &Tile, _: &CancelTok) {
     let mut out_buf = tile.out_buf();
 
     let amt = self.param_amt.get() as f32;

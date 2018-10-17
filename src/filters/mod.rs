@@ -11,7 +11,7 @@ pub use self::{dummy::*, flip::*, glitch::*, invert::*, panic::*};
 
 mod prelude {
   pub use super::{params::*, ArcProc, Filter};
-  pub use render::{Pixel, RenderProc, Tile};
+  pub use render::{CancelTok, Pixel, RenderProc, Tile};
   // TODO: it may be useful to include RwLock
   pub use std::sync::Arc;
 }

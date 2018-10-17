@@ -37,15 +37,19 @@ impl Filter for GlitchFilter {
 }
 
 impl RenderProc for Proc {
-  fn process_tile(&self, tile: &Tile) {
+  fn process_tile(&self, tile: &Tile, cancel_tok: &CancelTok) {
     let mut out_buf = tile.out_buf();
 
     for i in 0..out_buf.len() {
       out_buf[i] = Pixel::new(0.0, 0.5, 0.0, 1.0);
     }
 
-    thread::sleep(Duration::from_millis(
-      rand::thread_rng().gen_range(400, 700),
-    ));
+    for _ in 0..rand::thread_rng().gen_range(4, 7) {
+      if cancel_tok.cancelled() {
+        break;
+      }
+
+      thread::sleep(Duration::from_millis(100));
+    }
   }
 }

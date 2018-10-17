@@ -38,7 +38,6 @@ impl Tile {
     self.h
   }
 
-  // TODO: this can't handle pixels outside the tile
   pub fn get_input(&self, x: u32, y: u32) -> Pixel {
     if x >= self.w {
       panic!("x value {} out-of-bounds", x);
@@ -94,11 +93,20 @@ where
   }
 }
 
-// TODO: add some kind of cancellation token, maybe?
+pub struct CancelTok {
+  cancelled: AtomicBool,
+}
+
+impl CancelTok {
+  pub fn cancelled(&self) -> bool {
+    self.cancelled.load(Ordering::SeqCst)
+  }
+}
+
 pub trait RenderProc {
   fn begin(&self, _w: u32, _h: u32) {}
 
-  fn process_tile(&self, tile: &Tile);
+  fn process_tile(&self, tile: &Tile, tok: &CancelTok);
 }
 
 pub trait RenderCallback {
@@ -123,6 +131,7 @@ where
   worker: Option<ThreadPool<Arc<TaggedTile<C::Tag>>>>,
   proc: Arc<RenderProc + Send + Sync>,
   callback: C,
+  cancel_tok: Arc<CancelTok>,
 }
 
 impl<C> Renderer<C>
@@ -144,6 +153,9 @@ where
       worker: None,
       proc,
       callback,
+      cancel_tok: Arc::new(CancelTok {
+        cancelled: AtomicBool::new(false),
+      }),
     }
   }
 
@@ -168,11 +180,16 @@ where
     self.proc.begin(self.w, self.h);
 
     self.worker = Some(ThreadPool::new(
-      (0..self.njobs).map(|_| (self.proc.clone(), self.callback.clone())),
-      |_id, (proc, callback), tile: Arc<TaggedTile<C::Tag>>| {
-        // TODO: is this the right ordering?
+      (0..self.njobs).map(|_| {
+        (
+          self.proc.clone(),
+          self.callback.clone(),
+          self.cancel_tok.clone(),
+        )
+      }),
+      |_id, (proc, callback, cancel_tok), tile: Arc<TaggedTile<C::Tag>>| {
         if tile.dirty.swap(false, Ordering::SeqCst) {
-          proc.process_tile(&tile.tile);
+          proc.process_tile(&tile.tile, &cancel_tok);
 
           callback.handle_tile(tile);
         }
@@ -182,7 +199,6 @@ where
     let worker = self.worker.as_ref().unwrap();
 
     for tile in &self.tiles {
-      // TODO: is this the right ordering?
       if !tile.dirty.swap(true, Ordering::SeqCst) {
         worker.queue(tile.clone());
       }
@@ -200,11 +216,17 @@ where
   }
 
   fn abort_render(&mut self) -> bool {
+    self.cancel_tok.cancelled.store(true, Ordering::SeqCst);
+
     for tile in &self.tiles {
-      tile.dirty.store(false, Ordering::SeqCst); // TODO: is this the right ordering?
+      tile.dirty.store(false, Ordering::SeqCst);
     }
 
-    self.join_render()
+    let ret = self.join_render();
+
+    self.cancel_tok.cancelled.store(false, Ordering::SeqCst);
+
+    ret
   }
 
   pub fn rerender(&mut self) {
@@ -217,7 +239,7 @@ where
     I: GenericImageView<Pixel = Rgba<u8>>,
   {
     for tile in self.tiles.drain(0..) {
-      tile.dirty.store(false, Ordering::SeqCst); // TODO: is this the right ordering?
+      tile.dirty.store(false, Ordering::SeqCst);
     }
 
     self.join_render();
@@ -333,7 +355,7 @@ where
 pub struct DummyRenderProc;
 
 impl RenderProc for DummyRenderProc {
-  fn process_tile(&self, tile: &Tile) {
+  fn process_tile(&self, tile: &Tile, _: &CancelTok) {
     let mut out_buf = tile.out_buf();
 
     for r in 0..tile.h {
