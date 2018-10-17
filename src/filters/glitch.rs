@@ -2,7 +2,9 @@ use super::prelude::*;
 use rand::{self, prelude::*};
 use std::{thread, time::Duration};
 
-struct Proc {}
+struct Proc {
+  param_seed: Arc<IntParam>,
+}
 
 pub struct GlitchFilter {
   params: Vec<Param>,
@@ -11,9 +13,11 @@ pub struct GlitchFilter {
 
 impl GlitchFilter {
   pub fn new() -> Self {
+    let param_seed = Arc::new(IntParam::new(0));
+
     Self {
-      params: Vec::new(),
-      proc: Arc::new(Proc {}),
+      params: vec![Param("Seed".to_string(), param_seed.clone().into())],
+      proc: Arc::new(Proc { param_seed }),
     }
   }
 }

@@ -1,21 +1,28 @@
 use std::sync::{
-  atomic::{AtomicBool, Ordering},
+  atomic::{AtomicBool, AtomicI32, Ordering},
   Arc, RwLock, RwLockWriteGuard,
 };
 
 pub struct Param(pub String, pub ParamVal);
 
 pub enum ParamVal {
-  Switch(Arc<SwitchParam>),
+  Switch(Arc<BoolParam>),
+  SpinInt(Arc<IntParam>),
   RangedInt(Arc<RangedParam<i32>>),
   RangedFloat(Arc<RangedParam<f64>>),
 }
 
 use self::ParamVal::*;
 
-impl From<Arc<SwitchParam>> for ParamVal {
-  fn from(val: Arc<SwitchParam>) -> Self {
+impl From<Arc<BoolParam>> for ParamVal {
+  fn from(val: Arc<BoolParam>) -> Self {
     Switch(val)
+  }
+}
+
+impl From<Arc<IntParam>> for ParamVal {
+  fn from(val: Arc<IntParam>) -> Self {
+    SpinInt(val)
   }
 }
 
@@ -31,11 +38,11 @@ impl From<Arc<RangedParam<f64>>> for ParamVal {
   }
 }
 
-pub struct SwitchParam {
+pub struct BoolParam {
   value: AtomicBool,
 }
 
-impl SwitchParam {
+impl BoolParam {
   pub fn new(default: bool) -> Self {
     Self {
       value: AtomicBool::new(default),
@@ -48,6 +55,30 @@ impl SwitchParam {
 
   pub fn set(&self, val: bool) {
     self.value.store(val, Ordering::SeqCst);
+  }
+}
+
+pub struct IntParam {
+  value: AtomicI32,
+}
+
+impl IntParam {
+  pub fn new(default: i32) -> Self {
+    Self {
+      value: AtomicI32::new(default),
+    }
+  }
+
+  pub fn get(&self) -> i32 {
+    self.value.load(Ordering::SeqCst)
+  }
+
+  pub fn set(&self, val: i32) {
+    self.value.store(val, Ordering::SeqCst);
+  }
+
+  pub fn swap(&self, val: i32) -> i32 {
+    self.value.swap(val, Ordering::SeqCst)
   }
 }
 
@@ -136,5 +167,17 @@ where
     value.internal = val;
 
     self.coerce(&mut value);
+  }
+
+  pub fn swap(&self, val: T) -> T {
+    let mut value = self.value.write().unwrap();
+
+    let prev = value.coerced;
+
+    value.internal = val;
+
+    self.coerce(&mut value);
+
+    prev
   }
 }

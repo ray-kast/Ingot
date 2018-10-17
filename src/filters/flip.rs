@@ -8,8 +8,8 @@ struct Data {
 
 struct Proc {
   data: RwLock<Data>,
-  param_flipx: Arc<SwitchParam>,
-  param_flipy: Arc<SwitchParam>,
+  param_flipx: Arc<BoolParam>,
+  param_flipy: Arc<BoolParam>,
 }
 
 // TODO: make the axis configurable
@@ -20,8 +20,8 @@ pub struct FlipFilter {
 
 impl FlipFilter {
   pub fn new() -> Self {
-    let param_flipx = Arc::new(SwitchParam::new(true));
-    let param_flipy = Arc::new(SwitchParam::new(true));
+    let param_flipx = Arc::new(BoolParam::new(true));
+    let param_flipy = Arc::new(BoolParam::new(true));
 
     Self {
       params: vec![

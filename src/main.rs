@@ -1,3 +1,5 @@
+#![feature(integer_atomics)]
+
 extern crate gdk_pixbuf;
 extern crate gio;
 extern crate glib;
