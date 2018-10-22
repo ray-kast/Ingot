@@ -1,10 +1,11 @@
+use danger::Danger;
 use filters::{self, Filter};
 use gdk_pixbuf::{Colorspace, Pixbuf};
-use glib::{self, WeakRef};
+use glib;
 use gtk::{
   self, prelude::*, AccelFlags, AccelGroup, Application, ApplicationWindow, Box as GBox, Builder,
   Button, ButtonsType, ComboBoxText, DialogFlags, FileChooserAction, FileChooserDialog, HeaderBar,
-  Image as GImage, MessageDialog, MessageType, ResponseType, Window,
+  Image as GImage, Label, MessageDialog, MessageType, ProgressBar, ResponseType, Window,
 };
 use image;
 use image::{DynamicImage, GenericImageView};
@@ -26,12 +27,8 @@ use std::{
 // NB: I'm only doing this because these types are only accessed either directly
 //     on the main thread, or inside an idle callback
 struct DangerPixbuf(Pixbuf);
-#[derive(Clone)]
-struct DangerImage(WeakRef<gtk::Image>);
 
 unsafe impl Send for DangerPixbuf {}
-unsafe impl Send for DangerImage {}
-unsafe impl Sync for DangerImage {}
 
 type AppRenderer = Renderer<AppRenderCallback>;
 type RcAppRenderer = Rc<RefCell<AppRenderer>>;
@@ -51,6 +48,8 @@ pub struct App {
   save_btn: Button,
   image_preview: GImage,
   tool_box: GBox,
+  status_progress: ProgressBar,
+  status_text: Label,
   in_img: Rc<RefCell<Option<DynamicImage>>>,
   buf: Arc<Mutex<Option<DangerPixbuf>>>,
   renderer: RcAppRenderer,
@@ -80,16 +79,19 @@ impl App {
 
     let tool_box: GBox = builder.get_object("tool_box").unwrap();
 
+    let status_progress: ProgressBar = builder.get_object("status_progress").unwrap();
+    let status_text: Label = builder.get_object("status_text").unwrap();
+
     let buf = Arc::new(Mutex::new(None as Option<DangerPixbuf>));
 
-    let renderer = Self::gen_renderer(DangerImage(image_preview.downgrade()), buf.clone());
+    let renderer = Self::gen_renderer(&image_preview, &status_progress, &status_text, buf.clone());
 
     let filters = Rc::new({
       let mut filters = HashMap::new();
 
       for (i, flt) in vec![
         flt(filters::DummyFilter::new()),
-        // flt(filters::PanicFilter::new()),
+        flt(filters::PanicFilter::new()),
       ]
       .into_iter()
       .chain(filter_list.into_iter())
@@ -110,6 +112,8 @@ impl App {
       save_btn: save_btn.clone(),
       image_preview,
       tool_box,
+      status_progress,
+      status_text,
       in_img: Rc::new(RefCell::new(None)),
       buf,
       renderer,
@@ -122,7 +126,9 @@ impl App {
   }
 
   fn gen_renderer(
-    image_preview: DangerImage,
+    image_preview: &GImage,
+    status_progress: &ProgressBar,
+    status_text: &Label,
     buf: Arc<Mutex<Option<DangerPixbuf>>>,
   ) -> RcAppRenderer {
     let nthreads = num_cpus::get();
@@ -140,7 +146,12 @@ impl App {
       tile_y,
       nthreads,
       Arc::new(DummyRenderProc),
-      AppRenderCallback::new(image_preview, buf),
+      AppRenderCallback::new(
+        image_preview.into(),
+        status_progress.into(),
+        status_text.into(),
+        buf,
+      ),
     )))
   }
 
@@ -438,20 +449,33 @@ type AppTaggedTile = TaggedTile<AppRenderCallbackTag>;
 
 #[derive(Clone)]
 struct AppRenderCallback {
+  done: Arc<AtomicUsize>,
+  total: Arc<AtomicUsize>,
   running: Arc<AtomicBool>,
-  image_preview: DangerImage,
+  image_preview: Danger<GImage>,
+  status_progress: Danger<ProgressBar>,
+  status_text: Danger<Label>,
   buf: Arc<Mutex<Option<DangerPixbuf>>>,
   send: Sender<Arc<AppTaggedTile>>,
   recv: Arc<Mutex<Receiver<Arc<AppTaggedTile>>>>,
 }
 
 impl AppRenderCallback {
-  fn new(image_preview: DangerImage, buf: Arc<Mutex<Option<DangerPixbuf>>>) -> Self {
+  fn new(
+    image_preview: Danger<GImage>,
+    status_progress: Danger<ProgressBar>,
+    status_text: Danger<Label>,
+    buf: Arc<Mutex<Option<DangerPixbuf>>>,
+  ) -> Self {
     let (send, recv) = mpsc::channel();
 
     Self {
+      done: Arc::new(AtomicUsize::new(0)),
+      total: Arc::new(AtomicUsize::new(0)),
       running: Arc::new(AtomicBool::new(false)),
       image_preview,
+      status_progress,
+      status_text,
       buf,
       send,
       recv: Arc::new(Mutex::new(recv)),
@@ -462,7 +486,11 @@ impl AppRenderCallback {
     glib::idle_add({
       let buf = self.buf.clone();
       let image_preview = self.image_preview.clone();
+      let status_progress = self.status_progress.clone();
+      let status_text = self.status_text.clone();
       let recv = self.recv.clone();
+      let done = self.done.clone();
+      let total = self.total.clone();
       let running = self.running.clone();
 
       move || {
@@ -475,7 +503,9 @@ impl AppRenderCallback {
           None => return Continue(false),
         };
 
-        let image_preview = image_preview.0.upgrade().unwrap();
+        let image_preview = image_preview.upgrade().unwrap();
+        let status_progress = status_progress.upgrade().unwrap();
+        let status_text = status_text.upgrade().unwrap();
 
         let recv = recv.lock().unwrap();
 
@@ -508,6 +538,12 @@ impl AppRenderCallback {
 
         image_preview.set_from_pixbuf(Some(out_buf));
 
+        let done = done.load(Ordering::SeqCst);
+        let total = total.load(Ordering::SeqCst);
+
+        status_progress.set_fraction(done as f64 / total as f64);
+        status_text.set_text(&format!("{} / {}", done, total));
+
         if !did_work {
           running.store(false, Ordering::SeqCst);
         }
@@ -521,10 +557,18 @@ impl AppRenderCallback {
 impl RenderCallback for AppRenderCallback {
   type Tag = AppRenderCallbackTag;
 
+  // TODO: disable the save button during rendering
+
+  fn before_begin(&self, ntiles: usize) {
+    self.total.store(ntiles, Ordering::SeqCst);
+    self.done.store(0, Ordering::SeqCst);
+  }
+
   fn handle_tile(&self, tile: Arc<AppTaggedTile>) {
     // TODO: determine if DangerPixbuf is safe enough to blit to from another thread
 
     tile.tag().queued.fetch_add(1, Ordering::SeqCst);
+    self.done.fetch_add(1, Ordering::SeqCst);
     self.send.send(tile).unwrap();
 
     if !self.running.swap(true, Ordering::SeqCst) {

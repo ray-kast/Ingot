@@ -13,7 +13,9 @@ extern crate rand;
 mod autoclone;
 
 mod app;
+mod danger;
 mod filters;
+mod oneshot_pool;
 mod param_builder;
 mod render;
 mod thread_pool;

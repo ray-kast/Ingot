@@ -12,7 +12,7 @@ pub use self::{dummy::*, flip::*, glitch::*, invert::*, naive_median::*, panic::
 
 mod prelude {
   pub use super::{params::*, ArcProc, Filter};
-  pub use render::{CancelTok, Pixel, RenderProc, Tile};
+  pub use render::{CancelTok, Pixel, Quantum, RenderProc, Tile};
   pub use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 }
 

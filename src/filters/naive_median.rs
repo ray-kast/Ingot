@@ -1,6 +1,13 @@
 use super::prelude::*;
+use std::cmp;
+
+struct Data {
+  w: u32,
+  h: u32,
+}
 
 struct Proc {
+  data: RwLock<Data>,
   param_radius: Arc<RangedParam<i32>>,
 }
 
@@ -14,11 +21,10 @@ impl NaiveMedianFilter {
     let param_radius = Arc::new(RangedParam::new(3, 0, 20, 0, None));
 
     Self {
-      params: vec![
-        Param("Radius".to_string(), param_radius.clone().into()),
-      ],
+      params: vec![Param("Radius".to_string(), param_radius.clone().into())],
       proc: Arc::new(Proc {
         param_radius,
+        data: RwLock::new(Data { w: 0, h: 0 }),
       }),
     }
   }
@@ -39,35 +45,84 @@ impl Filter for NaiveMedianFilter {
 }
 
 impl Proc {
-  fn process_px<'a>(&self, tile: &Tile, r: u32, c: u32, radius: u32) -> Pixel {
-    for r2 in (r - radius)..(r + radius) {
-      for c2 in (c - radius)..(c + radius) {
+  fn process_px<'a>(
+    &self,
+    tile: &Tile,
+    data: &RwLockReadGuard<'a, Data>,
+    r: u32,
+    c: u32,
+    radius: u32,
+  ) -> Pixel {
+    if radius < 1 {
+      return tile.get_input(c, r);
+    }
 
+    let mut samples: [Vec<Quantum>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+
+    for r2 in (r - radius) as i32..(r + radius) as i32 {
+      let r2 = cmp::max(0, cmp::min((data.h - 1) as i32, r2 + tile.y() as i32)) as u32;
+
+      for c2 in (c - radius) as i32..(c + radius) as i32 {
+        let c2 = cmp::max(0, cmp::min((data.w - 1) as i32, c2 + tile.x() as i32)) as u32;
+
+        let px = tile.global_input(c2, r2);
+
+        for i in 0..4 {
+          samples[i].push(px[i]);
+        }
       }
     }
 
+    for i in 0..4 {
+      samples[i].sort_by(|a, b| a.partial_cmp(b).unwrap());
+    }
 
-    tile.get_input(c, r)
+    Pixel::new(
+      samples[0][samples[0].len() / 2],
+      samples[1][samples[1].len() / 2],
+      samples[2][samples[2].len() / 2],
+      samples[3][samples[3].len() / 2],
+    )
   }
 }
 
 impl RenderProc for Proc {
-  // fn begin(&self, w: u32, h: u32) {}
+  fn begin(&self, w: u32, h: u32) {
+    let mut data = self.data.write().unwrap();
+
+    data.w = w;
+    data.h = h;
+  }
 
   fn process_tile(&self, tile: &Tile, cancel_tok: &CancelTok) {
+    let data = self.data.read().unwrap();
     let mut out_buf = tile.out_buf();
 
     let radius = self.param_radius.get() as u32;
 
-    'row_loop: for r in 0..tile.h() {
-      let r_stride = r * tile.w();
+    if radius < 30 {
+      'row_loop_a: for r in 0..tile.h() {
+        let r_stride = r * tile.w();
 
-      if cancel_tok.cancelled() {
-        break 'row_loop;
+        if cancel_tok.cancelled() {
+          break 'row_loop_a;
+        }
+
+        for c in 0..tile.w() {
+          out_buf[(r_stride + c) as usize] = self.process_px(tile, &data, r, c, radius);
+        }
       }
+    } else {
+      'row_loop_b: for r in 0..tile.h() {
+        let r_stride = r * tile.w();
 
-      for c in 0..tile.w() {
-        out_buf[(r_stride + c) as usize] = self.process_px(tile, r, c, radius);
+        for c in 0..tile.w() {
+          if cancel_tok.cancelled() {
+            break 'row_loop_b;
+          }
+
+          out_buf[(r_stride + c) as usize] = self.process_px(tile, &data, r, c, radius);
+        }
       }
     }
   }

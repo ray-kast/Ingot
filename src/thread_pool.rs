@@ -50,7 +50,7 @@ where
       .into_iter()
       .enumerate()
       .map(|(id, closure)| {
-        let (tx, rx) = channel::<WorkerMessage>();
+        let (tx, rx) = channel::<WM>();
 
         let task_rx = task_rx.clone();
         let sched_tx = sched_tx.clone();
@@ -60,7 +60,7 @@ where
           match rx.recv().expect("failed to receive WM") {
             WM::Continue => loop {
               match {
-                let task_rx = task_rx.lock().expect("failed to receive task");
+                let task_rx = task_rx.lock().unwrap();
                 task_rx.try_recv()
               } {
                 Ok(t) => f(id, &closure, t),

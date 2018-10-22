@@ -1,5 +1,6 @@
 use image::{GenericImageView, Rgba, RgbaImage};
 use nalgebra::Vector4;
+use oneshot_pool::OneshotPool;
 use std::{
   cmp,
   sync::{
@@ -7,7 +8,6 @@ use std::{
     Arc, Mutex, MutexGuard,
   },
 };
-use thread_pool::ThreadPool;
 
 // TODO: worry about colorspace conversions
 
@@ -77,7 +77,6 @@ where
 {
   tile: Tile,
   tag: T,
-  dirty: AtomicBool,
 }
 
 impl<T> TaggedTile<T>
@@ -112,6 +111,10 @@ pub trait RenderProc {
 pub trait RenderCallback {
   type Tag;
 
+  fn before_begin(&self, _ntiles: usize) {}
+
+  fn after_end(&self) {}
+
   fn handle_tile(&self, tile: Arc<TaggedTile<Self::Tag>>)
   where
     Self::Tag: Send + Sync;
@@ -128,7 +131,7 @@ where
   tile_w: u32,
   tile_h: u32,
   tiles: Vec<Arc<TaggedTile<C::Tag>>>,
-  worker: Option<ThreadPool<Arc<TaggedTile<C::Tag>>>>,
+  worker: Option<OneshotPool<Arc<TaggedTile<C::Tag>>>>,
   proc: Arc<RenderProc + Send + Sync>,
   callback: C,
   cancel_tok: Arc<CancelTok>,
@@ -177,9 +180,11 @@ where
   }
 
   fn begin_render(&mut self) {
+    self.callback.before_begin(self.tiles.len());
     self.proc.begin(self.w, self.h);
 
-    self.worker = Some(ThreadPool::new(
+    self.worker = Some(OneshotPool::new(
+      self.tiles.iter().map(|t| t.clone()),
       (0..self.njobs).map(|_| {
         (
           self.proc.clone(),
@@ -188,21 +193,18 @@ where
         )
       }),
       |_id, (proc, callback, cancel_tok), tile: Arc<TaggedTile<C::Tag>>| {
-        if tile.dirty.swap(false, Ordering::SeqCst) {
-          proc.process_tile(&tile.tile, &cancel_tok);
+        proc.process_tile(&tile.tile, &cancel_tok);
 
-          callback.handle_tile(tile);
+        callback.handle_tile(tile);
+      },
+      {
+        let callback = self.callback.clone();
+
+        move || {
+          callback.after_end();
         }
       },
     ));
-
-    let worker = self.worker.as_ref().unwrap();
-
-    for tile in &self.tiles {
-      if !tile.dirty.swap(true, Ordering::SeqCst) {
-        worker.queue(tile.clone());
-      }
-    }
   }
 
   fn join_render(&mut self) -> bool {
@@ -218,11 +220,13 @@ where
   fn abort_render(&mut self) -> bool {
     self.cancel_tok.cancelled.store(true, Ordering::SeqCst);
 
-    for tile in &self.tiles {
-      tile.dirty.store(false, Ordering::SeqCst);
-    }
-
-    let ret = self.join_render();
+    let ret = match self.worker.take() {
+      Some(w) => {
+        w.abort();
+        true
+      }
+      None => false,
+    };
 
     self.cancel_tok.cancelled.store(false, Ordering::SeqCst);
 
@@ -239,11 +243,9 @@ where
   where
     I: GenericImageView<Pixel = Rgba<u8>>,
   {
-    for tile in self.tiles.drain(0..) {
-      tile.dirty.store(false, Ordering::SeqCst);
-    }
+    self.tiles.clear();
 
-    self.join_render();
+    self.abort_render();
 
     self.w = in_img.width();
     self.h = in_img.height();
@@ -292,7 +294,6 @@ where
               out_buf: Mutex::new(out_buf),
             },
             tag: Default::default(),
-            dirty: AtomicBool::new(false),
           })
         })
       })
