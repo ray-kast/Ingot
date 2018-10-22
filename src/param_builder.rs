@@ -1,6 +1,6 @@
 use filters::params::*;
 use gtk::{
-  prelude::*, Adjustment, Align, Box as GBox, Entry as GEntry, Grid, Label, Orientation, Scale,
+  prelude::*, Adjustment, Box as GBox, Entry as GEntry, Grid, Label, Orientation, Scale,
   SpinButton, Switch,
 };
 use render::{RenderCallback, Renderer};
@@ -87,7 +87,68 @@ where
         renderer.borrow_mut().rerender();
       }));
     }
-    P::RangedInt(r) => (),
+    P::RangedInt(r) => {
+      // TODO: much of this and RangedFloat are duplicate code
+
+      let (scl, adj, entry) = create_ranged_numeric(tool_box, name);
+
+      scl.set_digits(0);
+
+      adj.configure(r.get() as f64, r.min() as f64, r.max() as f64, 1.0, 1.0, 0.0);
+
+      scl.connect_value_changed(autoclone!(renderer, r, entry => move |scl| {
+        let val = scl.get_value().round() as i32;
+
+        r.set(val);
+
+        entry.set_text(&val.to_string());
+
+        renderer.borrow_mut().rerender();
+      }));
+
+      entry.connect_changed(autoclone!(renderer, r => move |entry| {
+        let val = match entry.get_text() {
+          Some(s) => s,
+          None => return, // TODO: also perform proper validation
+        };
+
+        let val: i32 = match val.parse() {
+          Ok(v) => v,
+          Err(_) => return, // TODO: perform proper validation
+        };
+
+        if r.swap(val) == val {
+          return;
+        }
+
+        renderer.borrow_mut().rerender();
+      }));
+
+      entry.connect_activate(autoclone!(renderer, r, scl => move |entry| {
+        let val = match entry.get_text() {
+          Some(s) => s,
+          None => return, // TODO: also perform proper validation
+        };
+
+        let val: i32 = match val.parse() {
+          Ok(v) => v,
+          Err(_) => return, // TODO: perform proper validation
+        };
+
+        if r.swap(val) == val {
+          return;
+        }
+
+        scl.set_value(r.get() as f64);
+
+        entry.set_position(0);
+        entry.select_region(0, -1);
+
+        renderer.borrow_mut().rerender();
+      }));
+
+      entry.set_text(&r.get().to_string());
+    },
     P::RangedFloat(r) => {
       let (scl, adj, entry) = create_ranged_numeric(tool_box, name);
 

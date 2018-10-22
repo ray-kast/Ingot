@@ -229,6 +229,7 @@ where
     ret
   }
 
+  // TODO: this may need to be asynchronous
   pub fn rerender(&mut self) {
     self.abort_render();
     self.begin_render();

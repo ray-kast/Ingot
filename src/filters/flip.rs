@@ -1,5 +1,4 @@
 use super::prelude::*;
-use std::sync::RwLock;
 
 struct Data {
   w: u32,

@@ -34,6 +34,7 @@ fn main() {
     *app = Some(App::new(gtk_app, vec![
       flt(filters::FlipFilter::new()),
       flt(filters::InvertFilter::new()),
+      flt(filters::NaiveMedianFilter::new()),
       flt(filters::GlitchFilter::new()),
     ]));
   }));

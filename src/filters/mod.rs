@@ -2,18 +2,18 @@ mod dummy;
 mod flip;
 mod glitch;
 mod invert;
+mod naive_median;
 mod panic;
 pub mod params;
 
-pub use self::{dummy::*, flip::*, glitch::*, invert::*, panic::*};
+pub use self::{dummy::*, flip::*, glitch::*, invert::*, naive_median::*, panic::*};
 
 // TODO: look into creating a macro to define filters
 
 mod prelude {
   pub use super::{params::*, ArcProc, Filter};
   pub use render::{CancelTok, Pixel, RenderProc, Tile};
-  // TODO: it may be useful to include RwLock
-  pub use std::sync::Arc;
+  pub use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 }
 
 use self::prelude::*;
