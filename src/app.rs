@@ -10,14 +10,14 @@ use image;
 use image::{DynamicImage, GenericImageView};
 use num_cpus;
 use param_builder;
-use render::{DummyRenderProc, RenderCallback, Renderer, TaggedTile, Tile};
+use render::{DummyRenderProc, RenderCallback, Renderer, TaggedTile};
 use std::{
   cell::RefCell,
   collections::HashMap,
   path::PathBuf,
   rc::Rc,
   sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::{self, Receiver, Sender},
     Arc, Mutex,
   },
@@ -423,13 +423,13 @@ impl App {
 }
 
 struct AppRenderCallbackTag {
-  queued: AtomicBool,
+  queued: AtomicUsize,
 }
 
 impl Default for AppRenderCallbackTag {
   fn default() -> Self {
     Self {
-      queued: AtomicBool::new(false),
+      queued: AtomicUsize::new(0),
     }
   }
 }
@@ -482,7 +482,7 @@ impl AppRenderCallback {
         for tile in recv.try_iter().take(500) {
           did_work = true;
 
-          if tile.tag().queued.swap(false, Ordering::SeqCst) {
+          if tile.tag().queued.fetch_sub(1, Ordering::SeqCst) == 1 {
             let tile = tile.tile();
 
             let tile_buf = tile.out_buf();
@@ -522,9 +522,10 @@ impl RenderCallback for AppRenderCallback {
   type Tag = AppRenderCallbackTag;
 
   fn handle_tile(&self, tile: Arc<AppTaggedTile>) {
-    if !tile.tag().queued.swap(true, Ordering::SeqCst) {
-      self.send.send(tile).unwrap();
-    }
+    // TODO: determine if DangerPixbuf is safe enough to blit to from another thread
+
+    tile.tag().queued.fetch_add(1, Ordering::SeqCst);
+    self.send.send(tile).unwrap();
 
     if !self.running.swap(true, Ordering::SeqCst) {
       self.dispatch_worker();
