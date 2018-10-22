@@ -1,3 +1,4 @@
-/target
+etc/
+target/
 *.rs.bk
 *.glade~
