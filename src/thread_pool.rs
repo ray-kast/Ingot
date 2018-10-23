@@ -11,7 +11,7 @@ pub struct ThreadPool<T>
 where
   T: Send + 'static,
 {
-  task_tx: Sender<T>, // TODO: maybe replace this with a Deque or something?
+  task_tx: Sender<T>,
   sched_tx: Sender<SchedMessage>,
   sched_handle: JoinHandle<()>,
 }

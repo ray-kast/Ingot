@@ -39,7 +39,6 @@ where
 pub struct App {
   win: ApplicationWindow,
   header: HeaderBar,
-  save_btn: Button,
   image_preview: GImage,
   tool_box: GBox,
   in_img: Rc<RefCell<Option<DynamicImage>>>,
@@ -80,6 +79,7 @@ impl App {
     let buf = Arc::new(Mutex::new(None as Option<Danger<Pixbuf>>));
 
     let renderer = Self::gen_renderer(
+      &save_btn,
       &image_preview,
       &status_progress,
       &status_text,
@@ -109,7 +109,6 @@ impl App {
     let ret = Self {
       win,
       header,
-      save_btn: save_btn.clone(),
       image_preview,
       tool_box,
       in_img: Rc::new(RefCell::new(None)),
@@ -118,12 +117,13 @@ impl App {
       filters,
     };
 
-    ret.init(open_btn, save_btn, filter_select, "0");
+    ret.init(win_accel_group, open_btn, save_btn, filter_select, "0");
 
     ret
   }
 
   fn gen_renderer(
+    save_btn: &Button,
     image_preview: &GImage,
     status_progress: &ProgressBar,
     status_text: &Label,
@@ -145,6 +145,7 @@ impl App {
       nthreads,
       Arc::new(DummyRenderProc),
       AppRenderCallback::new(
+        save_btn.into(),
         image_preview.into(),
         status_progress.into(),
         status_text.into(),
@@ -237,32 +238,24 @@ impl App {
 
   fn init(
     &self,
+    win_accel_group: AccelGroup,
     open_btn: Button,
     save_btn: Button,
     filter_select: ComboBoxText,
     default_filter_id: &str,
   ) {
-    //   {
-    //     let win = win.borrow_mut();
+    {
+      let (key, mods) = gtk::accelerator_parse("<Control>q");
 
-    //     win.show(); // TODO: figure out why the startup notification has just "."
-
-    //     win.connect_delete_event(|_, _| {
-    //       gtk::main_quit();
-    //       Inhibit(false)
-    //     });
-
-    //     // let (key, mods) = gtk::accelerator_parse("<Control>q");
-
-    //     // TODO: how does this even work? (I mean, it doesn't, but how to I make it work?)
-    //     // win.add_accelerator(
-    //     //   "unmap",
-    //     //   &win_accel_group,
-    //     //   key,
-    //     //   mods,
-    //     //   AccelFlags::VISIBLE,
-    //     // );
-    //   }
+      // TODO: how does this even work? (I mean, it doesn't, but how to I make it work?)
+      self.win.add_accelerator(
+        "unmap",
+        &win_accel_group,
+        key,
+        mods,
+        AccelFlags::VISIBLE,
+      );
+    }
 
     self.install_open_handler(&open_btn);
     self.install_save_handler(&save_btn);
@@ -281,7 +274,6 @@ impl App {
       let image_preview = self.image_preview.downgrade();
       let renderer = self.renderer.clone();
       let header = self.header.downgrade();
-      let save_btn = self.save_btn.downgrade();
 
       move |_| {
         let win = win.upgrade().unwrap();
@@ -300,7 +292,6 @@ impl App {
           let image_preview = image_preview.clone();
           let renderer = renderer.clone();
           let header = header.clone();
-          let save_btn = save_btn.clone();
 
           move || {
             let mut img = in_img.borrow_mut();
@@ -361,11 +352,8 @@ impl App {
             println!("  done");
 
             let header = header.upgrade().unwrap();
-            let save_btn = save_btn.upgrade().unwrap();
 
             header.set_subtitle(files[0].to_str());
-
-            save_btn.set_sensitive(true);
 
             Continue(false)
           }
@@ -467,6 +455,7 @@ struct AppRenderCallback {
   done: Arc<AtomicUsize>,
   total: Arc<AtomicUsize>,
   running: Arc<AtomicBool>,
+  save_btn: DangerWeak<Button>,
   image_preview: DangerWeak<GImage>,
   status_progress: DangerWeak<ProgressBar>,
   status_text: DangerWeak<Label>,
@@ -476,6 +465,7 @@ struct AppRenderCallback {
 
 impl AppRenderCallback {
   fn new(
+    save_btn: DangerWeak<Button>,
     image_preview: DangerWeak<GImage>,
     status_progress: DangerWeak<ProgressBar>,
     status_text: DangerWeak<Label>,
@@ -485,6 +475,7 @@ impl AppRenderCallback {
       done: Arc::new(AtomicUsize::new(0)),
       total: Arc::new(AtomicUsize::new(0)),
       running: Arc::new(AtomicBool::new(false)),
+      save_btn,
       image_preview,
       status_progress,
       status_text,
@@ -499,6 +490,7 @@ impl AppRenderCallback {
       let image_preview = self.image_preview.clone();
       let status_progress = self.status_progress.clone();
       let status_text = self.status_text.clone();
+      let save_btn = self.save_btn.clone();
       let q = self.q.clone();
       let done = self.done.clone();
       let total = self.total.clone();
@@ -509,53 +501,57 @@ impl AppRenderCallback {
 
         let out_buf = buf.lock().unwrap();
 
-        let out_buf = match &*out_buf {
-          Some(b) => &**b,
-          None => return Continue(false),
-        };
-
         let image_preview = image_preview.upgrade().unwrap();
         let status_progress = status_progress.upgrade().unwrap();
         let status_text = status_text.upgrade().unwrap();
+        let save_btn = save_btn.upgrade().unwrap();
 
-        let mut q = q.lock().unwrap();
+        if let Some(b) = &*out_buf {
+          let out_buf = &**b;
 
-        let len = q.len();
+          let mut q = q.lock().unwrap();
 
-        for tile in q.drain(0..cmp::min(500, len)) {
-          did_work = true;
+          let len = q.len();
 
-          if tile.tag().queued.fetch_sub(1, Ordering::SeqCst) == 1 {
-            let tile = tile.tile();
+          for tile in q.drain(0..cmp::min(500, len)) {
+            did_work = true;
 
-            let tile_buf = tile.out_buf();
+            if tile.tag().queued.fetch_sub(1, Ordering::SeqCst) == 1 {
+              let tile = tile.tile();
 
-            for r in 0..tile.h() {
-              let r_stride = r * tile.w();
+              let tile_buf = tile.out_buf();
 
-              for c in 0..tile.w() {
-                let px = tile_buf[(r_stride + c) as usize];
+              for r in 0..tile.h() {
+                let r_stride = r * tile.w();
 
-                out_buf.put_pixel(
-                  (tile.x() + c) as i32,
-                  (tile.y() + r) as i32,
-                  (px[0] * 255.0).round() as u8,
-                  (px[1] * 255.0).round() as u8,
-                  (px[2] * 255.0).round() as u8,
-                  (px[3] * 255.0).round() as u8,
-                );
+                for c in 0..tile.w() {
+                  let px = tile_buf[(r_stride + c) as usize];
+
+                  out_buf.put_pixel(
+                    (tile.x() + c) as i32,
+                    (tile.y() + r) as i32,
+                    (px[0] * 255.0).round() as u8,
+                    (px[1] * 255.0).round() as u8,
+                    (px[2] * 255.0).round() as u8,
+                    (px[3] * 255.0).round() as u8,
+                  );
+                }
               }
             }
           }
-        }
 
-        image_preview.set_from_pixbuf(Some(out_buf));
+          image_preview.set_from_pixbuf(Some(out_buf));
+        }
 
         let done = done.load(Ordering::SeqCst);
         let total = total.load(Ordering::SeqCst);
 
-        status_progress.set_fraction(done as f64 / total as f64);
+        let safe_total = cmp::max(1, total);
+
+        status_progress.set_fraction(done as f64 / safe_total as f64);
         status_text.set_text(&format!("{} / {}", done, total));
+
+        save_btn.set_sensitive(done >= safe_total);
 
         if !did_work {
           running.store(false, Ordering::SeqCst);
@@ -570,11 +566,13 @@ impl AppRenderCallback {
 impl RenderCallback for AppRenderCallback {
   type Tag = AppRenderCallbackTag;
 
-  // TODO: disable the save button during rendering
-
   fn before_begin(&self, ntiles: usize) {
     self.total.store(ntiles, Ordering::SeqCst);
     self.done.store(0, Ordering::SeqCst);
+
+    if !self.running.swap(true, Ordering::SeqCst) {
+      self.dispatch_worker();
+    }
   }
 
   fn abort(&self) {
