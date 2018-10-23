@@ -21,17 +21,11 @@ impl InvertFilter {
 }
 
 impl Filter for InvertFilter {
-  fn name(&self) -> &str {
-    "Invert"
-  }
+  fn name(&self) -> &str { "Invert" }
 
-  fn params(&self) -> &Vec<Param> {
-    &self.params
-  }
+  fn params(&self) -> &Vec<Param> { &self.params }
 
-  fn proc(&self) -> ArcProc {
-    self.proc.clone() as ArcProc
-  }
+  fn proc(&self) -> ArcProc { self.proc.clone() as ArcProc }
 }
 
 impl RenderProc for Proc {

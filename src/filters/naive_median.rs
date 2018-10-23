@@ -31,17 +31,11 @@ impl NaiveMedianFilter {
 }
 
 impl Filter for NaiveMedianFilter {
-  fn name(&self) -> &str {
-    "Median Blur (naive)"
-  }
+  fn name(&self) -> &str { "Median Blur (naive)" }
 
-  fn params(&self) -> &Vec<Param> {
-    &self.params
-  }
+  fn params(&self) -> &Vec<Param> { &self.params }
 
-  fn proc(&self) -> ArcProc {
-    self.proc.clone() as ArcProc
-  }
+  fn proc(&self) -> ArcProc { self.proc.clone() as ArcProc }
 }
 
 impl Proc {
@@ -57,13 +51,17 @@ impl Proc {
       return tile.get_input(c, r);
     }
 
-    let mut samples: [Vec<Quantum>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut samples: [Vec<Quantum>; 4] =
+      [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
     for r2 in (r - radius) as i32..(r + radius) as i32 {
-      let r2 = cmp::max(0, cmp::min((data.h - 1) as i32, r2 + tile.y() as i32)) as u32;
+      let r2 =
+        cmp::max(0, cmp::min((data.h - 1) as i32, r2 + tile.y() as i32)) as u32;
 
       for c2 in (c - radius) as i32..(c + radius) as i32 {
-        let c2 = cmp::max(0, cmp::min((data.w - 1) as i32, c2 + tile.x() as i32)) as u32;
+        let c2 =
+          cmp::max(0, cmp::min((data.w - 1) as i32, c2 + tile.x() as i32))
+            as u32;
 
         let px = tile.global_input(c2, r2);
 
@@ -109,7 +107,8 @@ impl RenderProc for Proc {
         }
 
         for c in 0..tile.w() {
-          out_buf[(r_stride + c) as usize] = self.process_px(tile, &data, r, c, radius);
+          out_buf[(r_stride + c) as usize] =
+            self.process_px(tile, &data, r, c, radius);
         }
       }
     } else {
@@ -121,7 +120,8 @@ impl RenderProc for Proc {
             break 'row_loop_b;
           }
 
-          out_buf[(r_stride + c) as usize] = self.process_px(tile, &data, r, c, radius);
+          out_buf[(r_stride + c) as usize] =
+            self.process_px(tile, &data, r, c, radius);
         }
       }
     }

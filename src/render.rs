@@ -25,18 +25,13 @@ pub struct Tile {
 }
 
 impl Tile {
-  pub fn x(&self) -> u32 {
-    self.x
-  }
-  pub fn y(&self) -> u32 {
-    self.y
-  }
-  pub fn w(&self) -> u32 {
-    self.w
-  }
-  pub fn h(&self) -> u32 {
-    self.h
-  }
+  pub fn x(&self) -> u32 { self.x }
+
+  pub fn y(&self) -> u32 { self.y }
+
+  pub fn w(&self) -> u32 { self.w }
+
+  pub fn h(&self) -> u32 { self.h }
 
   pub fn get_input(&self, x: u32, y: u32) -> Pixel {
     if x >= self.w {
@@ -62,13 +57,9 @@ impl Tile {
     self.out_buf.lock().unwrap()
   }
 
-  pub fn cx(&self) -> u32 {
-    self.x + self.w / 2
-  }
+  pub fn cx(&self) -> u32 { self.x + self.w / 2 }
 
-  pub fn cy(&self) -> u32 {
-    self.y + self.h / 2
-  }
+  pub fn cy(&self) -> u32 { self.y + self.h / 2 }
 }
 
 pub struct TaggedTile<T>
@@ -83,13 +74,9 @@ impl<T> TaggedTile<T>
 where
   T: Send + Sync,
 {
-  pub fn tile(&self) -> &Tile {
-    &self.tile
-  }
+  pub fn tile(&self) -> &Tile { &self.tile }
 
-  pub fn tag(&self) -> &T {
-    &self.tag
-  }
+  pub fn tag(&self) -> &T { &self.tag }
 }
 
 pub struct CancelTok {
@@ -97,9 +84,7 @@ pub struct CancelTok {
 }
 
 impl CancelTok {
-  pub fn cancelled(&self) -> bool {
-    self.cancelled.load(Ordering::SeqCst)
-  }
+  pub fn cancelled(&self) -> bool { self.cancelled.load(Ordering::SeqCst) }
 }
 
 pub trait RenderProc {
@@ -144,7 +129,13 @@ where
   C: RenderCallback + Clone + Send + 'static,
   C::Tag: Default + Send + Sync,
 {
-  pub fn new<P>(tile_w: u32, tile_h: u32, njobs: usize, proc: Arc<P>, callback: C) -> Self
+  pub fn new<P>(
+    tile_w: u32,
+    tile_h: u32,
+    njobs: usize,
+    proc: Arc<P>,
+    callback: C,
+  ) -> Self
   where
     P: RenderProc + Send + Sync + 'static,
   {
@@ -172,8 +163,12 @@ where
       let a = a.tile();
       let b = b.tile();
 
-      let da = (((a.cx() as f32 - cx).powi(2) + (a.cy() as f32 - cy).powi(2)) as f32).sqrt();
-      let db = (((b.cx() as f32 - cx).powi(2) + (b.cy() as f32 - cy).powi(2)) as f32).sqrt();
+      let da = (((a.cx() as f32 - cx).powi(2) + (a.cy() as f32 - cy).powi(2))
+        as f32)
+        .sqrt();
+      let db = (((b.cx() as f32 - cx).powi(2) + (b.cy() as f32 - cy).powi(2))
+        as f32)
+        .sqrt();
 
       da.partial_cmp(&db)
         .unwrap()
@@ -216,7 +211,7 @@ where
       Some(w) => {
         w.join();
         true
-      }
+      },
       None => false,
     }
   }
@@ -230,7 +225,7 @@ where
       Some(w) => {
         w.abort();
         true
-      }
+      },
       None => false,
     };
 
@@ -256,8 +251,10 @@ where
     self.w = in_img.width();
     self.h = in_img.height();
 
-    let tiles_x = self.w / self.tile_w + if self.w % self.tile_w > 0 { 1 } else { 0 };
-    let tiles_y = self.h / self.tile_h + if self.h % self.tile_h > 0 { 1 } else { 0 };
+    let tiles_x =
+      self.w / self.tile_w + if self.w % self.tile_w > 0 { 1 } else { 0 };
+    let tiles_y =
+      self.h / self.tile_h + if self.h % self.tile_h > 0 { 1 } else { 0 };
 
     let in_buf = Arc::new({
       let mut in_buf = Vec::new();
@@ -287,7 +284,8 @@ where
           let x = c * self.tile_w;
           let w = cmp::min(self.tile_w, self.w - x);
 
-          let out_buf: Vec<_> = (0..h * w).map(|_| Pixel::new(0.0, 0.0, 0.0, 0.0)).collect();
+          let out_buf: Vec<_> =
+            (0..h * w).map(|_| Pixel::new(0.0, 0.0, 0.0, 0.0)).collect();
 
           Arc::new(TaggedTile {
             tile: Tile {
@@ -355,9 +353,7 @@ where
   C: RenderCallback + Clone + Send + 'static,
   C::Tag: Default + Send + Sync,
 {
-  fn drop(&mut self) {
-    self.abort_render();
-  }
+  fn drop(&mut self) { self.abort_render(); }
 }
 
 pub struct DummyRenderProc;

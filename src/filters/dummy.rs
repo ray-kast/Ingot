@@ -16,15 +16,9 @@ impl DummyFilter {
 }
 
 impl Filter for DummyFilter {
-  fn name(&self) -> &str {
-    "None"
-  }
+  fn name(&self) -> &str { "None" }
 
-  fn params(&self) -> &Vec<Param> {
-    &self.params
-  }
+  fn params(&self) -> &Vec<Param> { &self.params }
 
-  fn proc(&self) -> ArcProc {
-    self.proc.clone() as ArcProc
-  }
+  fn proc(&self) -> ArcProc { self.proc.clone() as ArcProc }
 }

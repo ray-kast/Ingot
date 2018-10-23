@@ -26,7 +26,8 @@ use gtk::Application;
 use std::{cell::RefCell, env, rc::Rc};
 
 fn main() {
-  let gtk_app = Application::new("net.rk1024.ingot", ApplicationFlags::FLAGS_NONE).unwrap();
+  let gtk_app =
+    Application::new("net.rk1024.ingot", ApplicationFlags::FLAGS_NONE).unwrap();
 
   let app = Rc::new(RefCell::new(None as Option<App>));
 

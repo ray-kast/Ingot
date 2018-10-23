@@ -6,7 +6,9 @@ mod naive_median;
 mod panic;
 pub mod params;
 
-pub use self::{dummy::*, flip::*, glitch::*, invert::*, naive_median::*, panic::*};
+pub use self::{
+  dummy::*, flip::*, glitch::*, invert::*, naive_median::*, panic::*,
+};
 
 // TODO: look into creating a macro to define filters
 

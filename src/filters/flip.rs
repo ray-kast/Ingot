@@ -36,17 +36,11 @@ impl FlipFilter {
 }
 
 impl Filter for FlipFilter {
-  fn name(&self) -> &str {
-    "Flip"
-  }
+  fn name(&self) -> &str { "Flip" }
 
-  fn params(&self) -> &Vec<Param> {
-    &self.params
-  }
+  fn params(&self) -> &Vec<Param> { &self.params }
 
-  fn proc(&self) -> ArcProc {
-    self.proc.clone() as ArcProc
-  }
+  fn proc(&self) -> ArcProc { self.proc.clone() as ArcProc }
 }
 
 impl RenderProc for Proc {

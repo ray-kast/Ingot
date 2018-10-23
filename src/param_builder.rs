@@ -1,13 +1,16 @@
 use filters::params::*;
 use gtk::{
-  prelude::*, Adjustment, Box as GBox, Entry as GEntry, Grid, Label, Orientation, Scale,
-  SpinButton, Switch,
+  prelude::*, Adjustment, Box as GBox, Entry as GEntry, Grid, Label,
+  Orientation, Scale, SpinButton, Switch,
 };
 use render::{RenderCallback, Renderer};
 use std::{cell::RefCell, rc::Rc};
 
-pub fn build<C>(tool_box: &GBox, params: &Vec<Param>, renderer: &Rc<RefCell<Renderer<C>>>)
-where
+pub fn build<C>(
+  tool_box: &GBox,
+  params: &Vec<Param>,
+  renderer: &Rc<RefCell<Renderer<C>>>,
+) where
   C: RenderCallback + Clone + Send + 'static,
   C::Tag: Default + Send + Sync,
 {
@@ -22,8 +25,11 @@ where
   tool_box.show_all();
 }
 
-fn build_param<C>(tool_box: &GBox, param: &Param, renderer: &Rc<RefCell<Renderer<C>>>)
-where
+fn build_param<C>(
+  tool_box: &GBox,
+  param: &Param,
+  renderer: &Rc<RefCell<Renderer<C>>>,
+) where
   C: RenderCallback + Clone + Send + 'static,
   C::Tag: Default + Send + Sync,
 {
@@ -54,7 +60,7 @@ where
 
         Inhibit(false)
       }));
-    }
+    },
     P::SpinInt(i) => {
       let spin_box = GBox::new(Orientation::Horizontal, 2);
 
@@ -86,7 +92,7 @@ where
 
         renderer.borrow_mut().rerender();
       }));
-    }
+    },
     P::RangedInt(r) => {
       // TODO: much of this and RangedFloat are duplicate code
 
@@ -94,7 +100,14 @@ where
 
       scl.set_digits(0);
 
-      adj.configure(r.get() as f64, r.min() as f64, r.max() as f64, 1.0, 1.0, 0.0);
+      adj.configure(
+        r.get() as f64,
+        r.min() as f64,
+        r.max() as f64,
+        1.0,
+        1.0,
+        0.0,
+      );
 
       scl.connect_value_changed(autoclone!(renderer, r, entry => move |scl| {
         let val = scl.get_value().round() as i32;
@@ -208,11 +221,14 @@ where
       }));
 
       entry.set_text(&r.get().to_string());
-    }
+    },
   }
 }
 
-fn create_ranged_numeric(tool_box: &GBox, name: &str) -> (Scale, Adjustment, GEntry) {
+fn create_ranged_numeric(
+  tool_box: &GBox,
+  name: &str,
+) -> (Scale, Adjustment, GEntry) {
   let grid = Grid::new();
 
   let label = Label::new(name);

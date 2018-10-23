@@ -3,12 +3,12 @@ use filters::{self, Filter};
 use gdk_pixbuf::{Colorspace, Pixbuf};
 use glib;
 use gtk::{
-  self, prelude::*, AccelFlags, AccelGroup, Application, ApplicationWindow, Box as GBox, Builder,
-  Button, ButtonsType, ComboBoxText, DialogFlags, FileChooserAction, FileChooserDialog, HeaderBar,
-  Image as GImage, Label, MessageDialog, MessageType, ProgressBar, ResponseType, Window,
+  self, prelude::*, AccelFlags, AccelGroup, Application, ApplicationWindow,
+  Box as GBox, Builder, Button, ButtonsType, ComboBoxText, DialogFlags,
+  FileChooserAction, FileChooserDialog, HeaderBar, Image as GImage, Label,
+  MessageDialog, MessageType, ProgressBar, ResponseType, Window,
 };
-use image;
-use image::{DynamicImage, GenericImageView};
+use image::{self, DynamicImage, GenericImageView};
 use num_cpus;
 use param_builder;
 use render::{DummyRenderProc, RenderCallback, Renderer, TaggedTile};
@@ -58,7 +58,8 @@ impl App {
 
     win.set_application(gtk_app);
 
-    let win_accel_group: AccelGroup = builder.get_object("_root_accel_group").unwrap();
+    let win_accel_group: AccelGroup =
+      builder.get_object("_root_accel_group").unwrap();
 
     let header: HeaderBar = builder.get_object("header").unwrap();
 
@@ -67,16 +68,23 @@ impl App {
 
     let image_preview: GImage = builder.get_object("image_preview").unwrap();
 
-    let filter_select: ComboBoxText = builder.get_object("filter_select").unwrap();
+    let filter_select: ComboBoxText =
+      builder.get_object("filter_select").unwrap();
 
     let tool_box: GBox = builder.get_object("tool_box").unwrap();
 
-    let status_progress: ProgressBar = builder.get_object("status_progress").unwrap();
+    let status_progress: ProgressBar =
+      builder.get_object("status_progress").unwrap();
     let status_text: Label = builder.get_object("status_text").unwrap();
 
     let buf = Arc::new(Mutex::new(None as Option<Danger<Pixbuf>>));
 
-    let renderer = Self::gen_renderer(&image_preview, &status_progress, &status_text, buf.clone());
+    let renderer = Self::gen_renderer(
+      &image_preview,
+      &status_progress,
+      &status_text,
+      buf.clone(),
+    );
 
     let filters = Rc::new({
       let mut filters = HashMap::new();
@@ -149,7 +157,11 @@ impl App {
   where
     W: IsA<Window>,
   {
-    let dlg = FileChooserDialog::new(Some("Open Image"), parent, FileChooserAction::Open);
+    let dlg = FileChooserDialog::new(
+      Some("Open Image"),
+      parent,
+      FileChooserAction::Open,
+    );
 
     dlg.add_buttons(&[
       ("_Cancel", ResponseType::Cancel.into()),
@@ -159,11 +171,11 @@ impl App {
     dlg.set_modal(true);
 
     match ResponseType::from(dlg.run()) {
-      ResponseType::Accept => {}
+      ResponseType::Accept => {},
       _ => {
         dlg.destroy();
         return Vec::new();
-      }
+      },
     }
 
     let files = dlg.get_filenames();
@@ -177,7 +189,11 @@ impl App {
   where
     W: IsA<Window>,
   {
-    let dlg = FileChooserDialog::new(Some("Save Image"), parent, FileChooserAction::Save);
+    let dlg = FileChooserDialog::new(
+      Some("Save Image"),
+      parent,
+      FileChooserAction::Save,
+    );
 
     dlg.add_buttons(&[
       ("_Cancel", ResponseType::Cancel.into()),
@@ -188,11 +204,11 @@ impl App {
     dlg.set_modal(true);
 
     match ResponseType::from(dlg.run()) {
-      ResponseType::Accept => {}
+      ResponseType::Accept => {},
       _ => {
         dlg.destroy();
         return Vec::new();
-      }
+      },
     }
 
     let files = dlg.get_filenames();
@@ -206,7 +222,13 @@ impl App {
   where
     W: IsA<Window>,
   {
-    let dlg = MessageDialog::new(parent, DialogFlags::MODAL, msg_type, ButtonsType::Ok, msg);
+    let dlg = MessageDialog::new(
+      parent,
+      DialogFlags::MODAL,
+      msg_type,
+      ButtonsType::Ok,
+      msg,
+    );
 
     dlg.run();
 
@@ -297,7 +319,7 @@ impl App {
                 );
 
                 return Continue(false);
-              }
+              },
             });
 
             println!("  done");
@@ -389,7 +411,7 @@ impl App {
 
                   // TODO: delete any accidentally created files
                   return Continue(false);
-                }
+                },
               }
 
               println!("  done");

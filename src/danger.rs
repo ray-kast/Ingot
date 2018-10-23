@@ -17,18 +17,14 @@ impl<T> From<T> for Danger<T>
 where
   T: IsA<Object>,
 {
-  fn from(obj: T) -> Self {
-    Danger(obj)
-  }
+  fn from(obj: T) -> Self { Danger(obj) }
 }
 
 impl<'a, T> From<&'a T> for Danger<T>
 where
   T: IsA<Object> + Clone,
 {
-  fn from(obj: &'a T) -> Self {
-    Danger((*obj).clone())
-  }
+  fn from(obj: &'a T) -> Self { Danger((*obj).clone()) }
 }
 
 impl<T> Deref for Danger<T>
@@ -37,9 +33,7 @@ where
 {
   type Target = T;
 
-  fn deref(&self) -> &T {
-    &self.0
-  }
+  fn deref(&self) -> &T { &self.0 }
 }
 
 #[derive(Clone)]
@@ -54,18 +48,14 @@ impl<T> From<T> for DangerWeak<T>
 where
   T: IsA<Object> + ObjectExt,
 {
-  fn from(obj: T) -> Self {
-    DangerWeak(obj.downgrade())
-  }
+  fn from(obj: T) -> Self { DangerWeak(obj.downgrade()) }
 }
 
 impl<'a, T> From<&'a T> for DangerWeak<T>
 where
   T: IsA<Object> + ObjectExt,
 {
-  fn from(obj: &'a T) -> Self {
-    DangerWeak(obj.downgrade())
-  }
+  fn from(obj: &'a T) -> Self { DangerWeak(obj.downgrade()) }
 }
 
 impl<T> Deref for DangerWeak<T>
@@ -74,7 +64,5 @@ where
 {
   type Target = WeakRef<T>;
 
-  fn deref(&self) -> &WeakRef<T> {
-    &self.0
-  }
+  fn deref(&self) -> &WeakRef<T> { &self.0 }
 }

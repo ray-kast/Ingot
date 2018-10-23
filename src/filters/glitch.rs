@@ -23,17 +23,11 @@ impl GlitchFilter {
 }
 
 impl Filter for GlitchFilter {
-  fn name(&self) -> &str {
-    "Glitch"
-  }
+  fn name(&self) -> &str { "Glitch" }
 
-  fn params(&self) -> &Vec<Param> {
-    &self.params
-  }
+  fn params(&self) -> &Vec<Param> { &self.params }
 
-  fn proc(&self) -> ArcProc {
-    self.proc.clone() as ArcProc
-  }
+  fn proc(&self) -> ArcProc { self.proc.clone() as ArcProc }
 }
 
 impl RenderProc for Proc {

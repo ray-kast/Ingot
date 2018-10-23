@@ -99,7 +99,7 @@ where
 
               break;
             }
-          }
+          },
           SM::WakeAll => {
             for i in 0..workers.len() {
               if awake.insert(i) {
@@ -109,7 +109,7 @@ where
                   .expect("failed to send WM::Continue");
               }
             }
-          }
+          },
           SM::ForceWakeAll => {
             for i in 0..workers.len() {
               workers[i]
@@ -117,7 +117,7 @@ where
                 .send(WM::Continue)
                 .expect("failed to force-send WM::Continue");
             }
-          }
+          },
           SM::Stop => stopping = true,
         }
       }
