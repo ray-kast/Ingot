@@ -83,7 +83,7 @@ impl App {
 
       for (i, flt) in vec![
         flt(filters::DummyFilter::new()),
-        flt(filters::PanicFilter::new()),
+        // flt(filters::PanicFilter::new()),
       ]
       .into_iter()
       .chain(filter_list.into_iter())
