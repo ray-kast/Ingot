@@ -115,6 +115,8 @@ pub trait RenderCallback {
 
   fn after_end(&self) {}
 
+  fn abort(&self) {}
+
   fn handle_tile(&self, tile: Arc<TaggedTile<Self::Tag>>)
   where
     Self::Tag: Send + Sync;
@@ -195,7 +197,9 @@ where
       |_id, (proc, callback, cancel_tok), tile: Arc<TaggedTile<C::Tag>>| {
         proc.process_tile(&tile.tile, &cancel_tok);
 
-        callback.handle_tile(tile);
+        if !cancel_tok.cancelled() {
+          callback.handle_tile(tile);
+        }
       },
       {
         let callback = self.callback.clone();
@@ -219,6 +223,8 @@ where
 
   fn abort_render(&mut self) -> bool {
     self.cancel_tok.cancelled.store(true, Ordering::SeqCst);
+
+    self.callback.abort();
 
     let ret = match self.worker.take() {
       Some(w) => {

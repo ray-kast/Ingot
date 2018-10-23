@@ -1,4 +1,4 @@
-use danger::Danger;
+use danger::{Danger, DangerWeak};
 use filters::{self, Filter};
 use gdk_pixbuf::{Colorspace, Pixbuf};
 use glib;
@@ -14,21 +14,15 @@ use param_builder;
 use render::{DummyRenderProc, RenderCallback, Renderer, TaggedTile};
 use std::{
   cell::RefCell,
-  collections::HashMap,
+  cmp,
+  collections::{HashMap, VecDeque},
   path::PathBuf,
   rc::Rc,
   sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc::{self, Receiver, Sender},
     Arc, Mutex,
   },
 };
-
-// NB: I'm only doing this because these types are only accessed either directly
-//     on the main thread, or inside an idle callback
-struct DangerPixbuf(Pixbuf);
-
-unsafe impl Send for DangerPixbuf {}
 
 type AppRenderer = Renderer<AppRenderCallback>;
 type RcAppRenderer = Rc<RefCell<AppRenderer>>;
@@ -48,10 +42,8 @@ pub struct App {
   save_btn: Button,
   image_preview: GImage,
   tool_box: GBox,
-  status_progress: ProgressBar,
-  status_text: Label,
   in_img: Rc<RefCell<Option<DynamicImage>>>,
-  buf: Arc<Mutex<Option<DangerPixbuf>>>,
+  buf: Arc<Mutex<Option<Danger<Pixbuf>>>>,
   renderer: RcAppRenderer,
   filters: Rc<HashMap<String, ArcFilter>>,
 }
@@ -82,7 +74,7 @@ impl App {
     let status_progress: ProgressBar = builder.get_object("status_progress").unwrap();
     let status_text: Label = builder.get_object("status_text").unwrap();
 
-    let buf = Arc::new(Mutex::new(None as Option<DangerPixbuf>));
+    let buf = Arc::new(Mutex::new(None as Option<Danger<Pixbuf>>));
 
     let renderer = Self::gen_renderer(&image_preview, &status_progress, &status_text, buf.clone());
 
@@ -112,8 +104,6 @@ impl App {
       save_btn: save_btn.clone(),
       image_preview,
       tool_box,
-      status_progress,
-      status_text,
       in_img: Rc::new(RefCell::new(None)),
       buf,
       renderer,
@@ -129,7 +119,7 @@ impl App {
     image_preview: &GImage,
     status_progress: &ProgressBar,
     status_text: &Label,
-    buf: Arc<Mutex<Option<DangerPixbuf>>>,
+    buf: Arc<Mutex<Option<Danger<Pixbuf>>>>,
   ) -> RcAppRenderer {
     let nthreads = num_cpus::get();
     let tile_x: u32 = 64;
@@ -316,16 +306,19 @@ impl App {
 
             let img = img.as_ref().unwrap();
 
-            *buf = Some(DangerPixbuf(Pixbuf::new(
-              Colorspace::Rgb,
-              true,
-              8,
-              img.width() as i32,
-              img.height() as i32,
-            )));
+            *buf = Some(
+              Pixbuf::new(
+                Colorspace::Rgb,
+                true,
+                8,
+                img.width() as i32,
+                img.height() as i32,
+              )
+              .into(),
+            );
 
             let image_preview = image_preview.upgrade().unwrap();
-            let buf = &buf.as_ref().unwrap().0;
+            let buf = &**buf.as_ref().unwrap();
 
             image_preview.set_from_pixbuf(Some(buf));
 
@@ -452,23 +445,20 @@ struct AppRenderCallback {
   done: Arc<AtomicUsize>,
   total: Arc<AtomicUsize>,
   running: Arc<AtomicBool>,
-  image_preview: Danger<GImage>,
-  status_progress: Danger<ProgressBar>,
-  status_text: Danger<Label>,
-  buf: Arc<Mutex<Option<DangerPixbuf>>>,
-  send: Sender<Arc<AppTaggedTile>>,
-  recv: Arc<Mutex<Receiver<Arc<AppTaggedTile>>>>,
+  image_preview: DangerWeak<GImage>,
+  status_progress: DangerWeak<ProgressBar>,
+  status_text: DangerWeak<Label>,
+  buf: Arc<Mutex<Option<Danger<Pixbuf>>>>,
+  q: Arc<Mutex<VecDeque<Arc<AppTaggedTile>>>>,
 }
 
 impl AppRenderCallback {
   fn new(
-    image_preview: Danger<GImage>,
-    status_progress: Danger<ProgressBar>,
-    status_text: Danger<Label>,
-    buf: Arc<Mutex<Option<DangerPixbuf>>>,
+    image_preview: DangerWeak<GImage>,
+    status_progress: DangerWeak<ProgressBar>,
+    status_text: DangerWeak<Label>,
+    buf: Arc<Mutex<Option<Danger<Pixbuf>>>>,
   ) -> Self {
-    let (send, recv) = mpsc::channel();
-
     Self {
       done: Arc::new(AtomicUsize::new(0)),
       total: Arc::new(AtomicUsize::new(0)),
@@ -477,8 +467,7 @@ impl AppRenderCallback {
       status_progress,
       status_text,
       buf,
-      send,
-      recv: Arc::new(Mutex::new(recv)),
+      q: Arc::new(Mutex::new(VecDeque::new())),
     }
   }
 
@@ -488,7 +477,7 @@ impl AppRenderCallback {
       let image_preview = self.image_preview.clone();
       let status_progress = self.status_progress.clone();
       let status_text = self.status_text.clone();
-      let recv = self.recv.clone();
+      let q = self.q.clone();
       let done = self.done.clone();
       let total = self.total.clone();
       let running = self.running.clone();
@@ -499,7 +488,7 @@ impl AppRenderCallback {
         let out_buf = buf.lock().unwrap();
 
         let out_buf = match &*out_buf {
-          Some(b) => &b.0,
+          Some(b) => &**b,
           None => return Continue(false),
         };
 
@@ -507,9 +496,11 @@ impl AppRenderCallback {
         let status_progress = status_progress.upgrade().unwrap();
         let status_text = status_text.upgrade().unwrap();
 
-        let recv = recv.lock().unwrap();
+        let mut q = q.lock().unwrap();
 
-        for tile in recv.try_iter().take(500) {
+        let len = q.len();
+
+        for tile in q.drain(0..cmp::min(500, len)) {
           did_work = true;
 
           if tile.tag().queued.fetch_sub(1, Ordering::SeqCst) == 1 {
@@ -564,12 +555,22 @@ impl RenderCallback for AppRenderCallback {
     self.done.store(0, Ordering::SeqCst);
   }
 
+  fn abort(&self) {
+    if self.running.load(Ordering::SeqCst) {
+      let mut q = self.q.lock().unwrap();
+
+      for tile in q.drain(..) {
+        tile.tag().queued.store(0, Ordering::SeqCst);
+      }
+    }
+  }
+
   fn handle_tile(&self, tile: Arc<AppTaggedTile>) {
-    // TODO: determine if DangerPixbuf is safe enough to blit to from another thread
+    // TODO: determine if Danger<Pixbuf> is safe enough to blit to from another thread
 
     tile.tag().queued.fetch_add(1, Ordering::SeqCst);
     self.done.fetch_add(1, Ordering::SeqCst);
-    self.send.send(tile).unwrap();
+    self.q.lock().unwrap().push_back(tile);
 
     if !self.running.swap(true, Ordering::SeqCst) {
       self.dispatch_worker();
