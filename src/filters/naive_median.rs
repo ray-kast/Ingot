@@ -54,11 +54,15 @@ impl Proc {
     let mut samples: [Vec<Quantum>; 4] =
       [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
 
-    for r2 in (r - radius) as i32..(r + radius) as i32 {
+    let r = r as i32;
+    let c = c as i32;
+    let radius = radius as i32;
+
+    for r2 in (r - radius)..(r + radius) {
       let r2 =
         cmp::max(0, cmp::min((data.h - 1) as i32, r2 + tile.y() as i32)) as u32;
 
-      for c2 in (c - radius) as i32..(c + radius) as i32 {
+      for c2 in (c - radius)..(c + radius) {
         let c2 =
           cmp::max(0, cmp::min((data.w - 1) as i32, c2 + tile.x() as i32))
             as u32;

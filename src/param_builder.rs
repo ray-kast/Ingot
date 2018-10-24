@@ -112,7 +112,9 @@ fn build_param<C>(
       scl.connect_value_changed(autoclone!(renderer, r, entry => move |scl| {
         let val = scl.get_value().round() as i32;
 
-        r.set(val);
+        if r.swap(val) == val {
+          return;
+        }
 
         entry.set_text(&val.to_string());
 

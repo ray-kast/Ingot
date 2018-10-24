@@ -436,16 +436,10 @@ impl App {
   }
 }
 
-struct AppRenderCallbackTag {
-  queued: AtomicUsize,
-}
+struct AppRenderCallbackTag;
 
 impl Default for AppRenderCallbackTag {
-  fn default() -> Self {
-    Self {
-      queued: AtomicUsize::new(0),
-    }
-  }
+  fn default() -> Self { AppRenderCallbackTag }
 }
 
 type AppTaggedTile = TaggedTile<AppRenderCallbackTag>;
@@ -500,42 +494,48 @@ impl AppRenderCallback {
         let mut did_work = false;
 
         let out_buf = buf.lock().unwrap();
+        let mut qlen: usize = 0;
 
         let image_preview = image_preview.upgrade().unwrap();
-        let status_progress = status_progress.upgrade().unwrap();
+        // All of these pointers should expire at the same time (and we're on the
+        // main thread) so hopefully only one check here is necessary
+        let status_progress = match status_progress.upgrade() {
+          Some(s) => s,
+          None => return Continue(false),
+        };
         let status_text = status_text.upgrade().unwrap();
         let save_btn = save_btn.upgrade().unwrap();
+
+        const CHUNK_SIZE: usize = 500;
 
         if let Some(b) = &*out_buf {
           let out_buf = &**b;
 
           let mut q = q.lock().unwrap();
 
-          let len = q.len();
+          qlen = q.len();
 
-          for tile in q.drain(0..cmp::min(500, len)) {
+          for tile in q.drain(0..cmp::min(CHUNK_SIZE, qlen)) {
             did_work = true;
 
-            if tile.tag().queued.fetch_sub(1, Ordering::SeqCst) == 1 {
-              let tile = tile.tile();
+            let tile = tile.tile();
 
-              let tile_buf = tile.out_buf();
+            let tile_buf = tile.out_buf();
 
-              for r in 0..tile.h() {
-                let r_stride = r * tile.w();
+            for r in 0..tile.h() {
+              let r_stride = r * tile.w();
 
-                for c in 0..tile.w() {
-                  let px = tile_buf[(r_stride + c) as usize];
+              for c in 0..tile.w() {
+                let px = tile_buf[(r_stride + c) as usize];
 
-                  out_buf.put_pixel(
-                    (tile.x() + c) as i32,
-                    (tile.y() + r) as i32,
-                    (px[0] * 255.0).round() as u8,
-                    (px[1] * 255.0).round() as u8,
-                    (px[2] * 255.0).round() as u8,
-                    (px[3] * 255.0).round() as u8,
-                  );
-                }
+                out_buf.put_pixel(
+                  (tile.x() + c) as i32,
+                  (tile.y() + r) as i32,
+                  (px[0] * 255.0).round() as u8,
+                  (px[1] * 255.0).round() as u8,
+                  (px[2] * 255.0).round() as u8,
+                  (px[3] * 255.0).round() as u8,
+                );
               }
             }
           }
@@ -549,7 +549,14 @@ impl AppRenderCallback {
         let safe_total = cmp::max(1, total);
 
         status_progress.set_fraction(done as f64 / safe_total as f64);
-        status_text.set_text(&format!("{} / {}", done, total));
+
+        let text = if qlen < CHUNK_SIZE {
+          format!("{} / {}", done, total)
+        } else {
+          format!("{} / {} (blitting {})", done, total, qlen)
+        };
+
+        status_text.set_text(&text);
 
         save_btn.set_sensitive(done >= safe_total);
 
@@ -579,16 +586,13 @@ impl RenderCallback for AppRenderCallback {
     if self.running.load(Ordering::SeqCst) {
       let mut q = self.q.lock().unwrap();
 
-      for tile in q.drain(..) {
-        tile.tag().queued.store(0, Ordering::SeqCst);
-      }
+      q.clear();
     }
   }
 
   fn handle_tile(&self, tile: Arc<AppTaggedTile>) {
     // TODO: determine if Danger<Pixbuf> is safe enough to blit to from another thread
 
-    tile.tag().queued.fetch_add(1, Ordering::SeqCst);
     self.done.fetch_add(1, Ordering::SeqCst);
     self.q.lock().unwrap().push_back(tile);
 
