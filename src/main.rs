@@ -35,6 +35,7 @@ fn main() {
     let mut app = app.borrow_mut();
 
     *app = Some(App::new(gtk_app, vec![
+      flt(filters::BlankFilter::new()),
       flt(filters::FlipFilter::new()),
       flt(filters::InvertFilter::new()),
       flt(filters::NaiveMedianFilter::new()),

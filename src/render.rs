@@ -90,7 +90,7 @@ impl CancelTok {
 pub trait RenderProc {
   fn begin(&self, _w: u32, _h: u32) {}
 
-  fn process_tile(&self, tile: &Tile, tok: &CancelTok);
+  fn process_tile(&self, tile: &Tile, cancel_tok: &CancelTok);
 }
 
 pub trait RenderCallback {

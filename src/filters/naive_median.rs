@@ -23,8 +23,8 @@ impl NaiveMedianFilter {
     Self {
       params: vec![Param("Radius".to_string(), param_radius.clone().into())],
       proc: Arc::new(Proc {
-        param_radius,
         data: RwLock::new(Data { w: 0, h: 0 }),
+        param_radius,
       }),
     }
   }
@@ -51,8 +51,7 @@ impl Proc {
       return tile.get_input(c, r);
     }
 
-    let mut samples: [Vec<Quantum>; 4] =
-      [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut samples: [Vec<Quantum>; 4] = Default::default();
 
     let r = r as i32;
     let c = c as i32;

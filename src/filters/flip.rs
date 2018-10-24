@@ -27,9 +27,9 @@ impl FlipFilter {
         Param("Flip Y".to_string(), param_flipy.clone().into()),
       ],
       proc: Arc::new(Proc {
+        data: RwLock::new(Data { w: 0, h: 0 }),
         param_flipx,
         param_flipy,
-        data: RwLock::new(Data { w: 0, h: 0 }),
       }),
     }
   }
