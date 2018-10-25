@@ -20,7 +20,7 @@ use std::{
   rc::Rc,
   sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, RwLock,
   },
 };
 
@@ -454,6 +454,7 @@ struct AppRenderCallback {
   status_progress: DangerWeak<ProgressBar>,
   status_text: DangerWeak<Label>,
   buf: Arc<Mutex<Option<Danger<Pixbuf>>>>,
+  working: Arc<RwLock<HashMap<usize, Arc<AppTaggedTile>>>>,
   q: Arc<Mutex<VecDeque<Arc<AppTaggedTile>>>>,
 }
 
@@ -474,17 +475,23 @@ impl AppRenderCallback {
       status_progress,
       status_text,
       buf,
+      working: Arc::new(RwLock::new(HashMap::new())), // TODO: this might need weak references
       q: Arc::new(Mutex::new(VecDeque::new())),
     }
   }
 
   fn dispatch_worker(&self) {
+    if self.running.swap(true, Ordering::SeqCst) {
+      return;
+    }
+
     glib::idle_add({
       let buf = self.buf.clone();
       let image_preview = self.image_preview.clone();
       let status_progress = self.status_progress.clone();
       let status_text = self.status_text.clone();
       let save_btn = self.save_btn.clone();
+      let working = self.working.clone();
       let q = self.q.clone();
       let done = self.done.clone();
       let total = self.total.clone();
@@ -511,31 +518,61 @@ impl AppRenderCallback {
         if let Some(b) = &*out_buf {
           let out_buf = &**b;
 
-          let mut q = q.lock().unwrap();
+          {
+            let mut working = working.read().unwrap();
 
-          qlen = q.len();
+            for tile in working.values() {
+              let tile = tile.tile();
 
-          for tile in q.drain(0..cmp::min(CHUNK_SIZE, qlen)) {
-            did_work = true;
+              let last_r = tile.h() - 1;
+              let last_c = tile.w() - 1;
 
-            let tile = tile.tile();
+              for r in 0..tile.h() {
+                for c in 0..tile.w() {
+                  out_buf.put_pixel(
+                    (tile.x() + c) as i32,
+                    (tile.y() + r) as i32,
+                    if r == 0 || r == last_r || c == 0 || c == last_c {
+                      255
+                    } else {
+                      31
+                    },
+                    31,
+                    31,
+                    255,
+                  );
+                }
+              }
+            }
+          }
 
-            let tile_buf = tile.out_buf();
+          {
+            let mut q = q.lock().unwrap();
 
-            for r in 0..tile.h() {
-              let r_stride = r * tile.w();
+            qlen = q.len();
 
-              for c in 0..tile.w() {
-                let px = tile_buf[(r_stride + c) as usize];
+            for tile in q.drain(0..cmp::min(CHUNK_SIZE, qlen)) {
+              did_work = true;
 
-                out_buf.put_pixel(
-                  (tile.x() + c) as i32,
-                  (tile.y() + r) as i32,
-                  (px[0] * 255.0).round() as u8,
-                  (px[1] * 255.0).round() as u8,
-                  (px[2] * 255.0).round() as u8,
-                  (px[3] * 255.0).round() as u8,
-                );
+              let tile = tile.tile();
+
+              let tile_buf = tile.out_buf();
+
+              for r in 0..tile.h() {
+                let r_stride = r * tile.w();
+
+                for c in 0..tile.w() {
+                  let px = tile_buf[(r_stride + c) as usize];
+
+                  out_buf.put_pixel(
+                    (tile.x() + c) as i32,
+                    (tile.y() + r) as i32,
+                    (px[0] * 255.0).round() as u8,
+                    (px[1] * 255.0).round() as u8,
+                    (px[2] * 255.0).round() as u8,
+                    (px[3] * 255.0).round() as u8,
+                  );
+                }
               }
             }
           }
@@ -577,9 +614,7 @@ impl RenderCallback for AppRenderCallback {
     self.total.store(ntiles, Ordering::SeqCst);
     self.done.store(0, Ordering::SeqCst);
 
-    if !self.running.swap(true, Ordering::SeqCst) {
-      self.dispatch_worker();
-    }
+    self.dispatch_worker();
   }
 
   fn abort(&self) {
@@ -590,14 +625,25 @@ impl RenderCallback for AppRenderCallback {
     }
   }
 
-  fn handle_tile(&self, tile: Arc<AppTaggedTile>) {
+  fn before_tile(&self, tile: Arc<AppTaggedTile>, wid: usize) {
+    self.working.write().unwrap().insert(wid, tile);
+
+    self.dispatch_worker();
+  }
+
+  fn handle_tile(&self, tile: Arc<AppTaggedTile>, wid: usize) {
     // TODO: determine if Danger<Pixbuf> is safe enough to blit to from another thread
 
     self.done.fetch_add(1, Ordering::SeqCst);
-    self.q.lock().unwrap().push_back(tile);
 
-    if !self.running.swap(true, Ordering::SeqCst) {
-      self.dispatch_worker();
+    {
+      let mut q = self.q.lock().unwrap();
+      let mut working = self.working.write().unwrap();
+
+      q.push_back(tile);
+      working.remove(&wid);
     }
+
+    self.dispatch_worker();
   }
 }

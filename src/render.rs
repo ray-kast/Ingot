@@ -102,7 +102,13 @@ pub trait RenderCallback {
 
   fn abort(&self) {}
 
-  fn handle_tile(&self, tile: Arc<TaggedTile<Self::Tag>>)
+  fn before_tile(&self, tile: Arc<TaggedTile<Self::Tag>>, wid: usize)
+  where
+    Self::Tag: Send + Sync,
+  {
+  }
+
+  fn handle_tile(&self, tile: Arc<TaggedTile<Self::Tag>>, wid: usize)
   where
     Self::Tag: Send + Sync;
 }
@@ -189,11 +195,13 @@ where
           self.cancel_tok.clone(),
         )
       }),
-      |_id, (proc, callback, cancel_tok), tile: Arc<TaggedTile<C::Tag>>| {
+      |id, (proc, callback, cancel_tok), tile: Arc<TaggedTile<C::Tag>>| {
+        callback.before_tile(tile.clone(), id);
+
         proc.process_tile(&tile.tile, &cancel_tok);
 
         if !cancel_tok.cancelled() {
-          callback.handle_tile(tile);
+          callback.handle_tile(tile, id);
         }
       },
       {
