@@ -1,6 +1,6 @@
 use danger::{Danger, DangerWeak};
 use filters::{self, Filter};
-use gdk_pixbuf::{Colorspace, Pixbuf};
+use gdk_pixbuf::{prelude::*, Colorspace, Pixbuf};
 use glib;
 use gtk::{
   self, prelude::*, AccelFlags, AccelGroup, Application, ApplicationWindow,
@@ -454,6 +454,7 @@ struct AppRenderCallback {
   status_progress: DangerWeak<ProgressBar>,
   status_text: DangerWeak<Label>,
   buf: Arc<Mutex<Option<Danger<Pixbuf>>>>,
+  clear_buf: Arc<AtomicBool>,
   working: Arc<RwLock<HashMap<usize, Arc<AppTaggedTile>>>>,
   q: Arc<Mutex<VecDeque<Arc<AppTaggedTile>>>>,
 }
@@ -475,6 +476,7 @@ impl AppRenderCallback {
       status_progress,
       status_text,
       buf,
+      clear_buf: Arc::new(AtomicBool::new(false)),
       working: Arc::new(RwLock::new(HashMap::new())), // TODO: this might need weak references
       q: Arc::new(Mutex::new(VecDeque::new())),
     }
@@ -491,6 +493,7 @@ impl AppRenderCallback {
       let status_progress = self.status_progress.clone();
       let status_text = self.status_text.clone();
       let save_btn = self.save_btn.clone();
+      let clear_buf = self.clear_buf.clone();
       let working = self.working.clone();
       let q = self.q.clone();
       let done = self.done.clone();
@@ -518,8 +521,18 @@ impl AppRenderCallback {
         if let Some(b) = &*out_buf {
           let out_buf = &**b;
 
+          if clear_buf.swap(false, Ordering::SeqCst) {
+            for r in 0..out_buf.get_height() {
+              for c in 0..out_buf.get_width() {
+                out_buf.put_pixel(c, r, 31, 31, 31, 255);
+              }
+            }
+          }
+
           {
             let mut working = working.read().unwrap();
+
+            // TODO: the logic behind this could be improved
 
             for tile in working.values() {
               let tile = tile.tile();
@@ -607,17 +620,22 @@ impl AppRenderCallback {
   }
 }
 
+// TODO: use a lighter-weight preview for faster filters
 impl RenderCallback for AppRenderCallback {
   type Tag = AppRenderCallbackTag;
 
   fn before_begin(&self, ntiles: usize) {
     self.total.store(ntiles, Ordering::SeqCst);
     self.done.store(0, Ordering::SeqCst);
+    self.clear_buf.store(true, Ordering::SeqCst);
+    self.working.write().unwrap().clear();
 
     self.dispatch_worker();
   }
 
   fn abort(&self) {
+    self.working.write().unwrap().clear();
+
     if self.running.load(Ordering::SeqCst) {
       let mut q = self.q.lock().unwrap();
 
